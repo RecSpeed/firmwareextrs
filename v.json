@@ -11,4 +11,11 @@
     "vendor_boot_img_zip": "true",
     "app_settings_zip": "true"
   }
+,
+"miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0": {
+  "boot_img_zip": "true",
+  "init_boot_img_zip": "false",
+  "vendor_boot_img_zip": "false",
+  "app_settings_zip": "false"
+}
 }
