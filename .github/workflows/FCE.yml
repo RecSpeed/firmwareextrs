@@ -8,14 +8,16 @@ on:
       track:
         required: false
 
-env:
-  URL: ${{ github.event.inputs.url }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
+    env:
+      URL: ${{ github.event.inputs.url }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      API_ID: ${{ secrets.API_ID }}
+      API_HASH: ${{ secrets.API_HASH }}
+      PHONE: ${{ secrets.PHONE }}
 
     steps:  
       - uses: actions/checkout@v4  
@@ -51,15 +53,7 @@ jobs:
           rm exrom.zip  
 
       - name: EC  
-        env:
-          API_ID: ${{ secrets.API_ID }}  
-          API_HASH: ${{ secrets.API_HASH }}  
-          PHONE: ${{ secrets.PHONE }}
         run: |
-          export API_ID=${{ secrets.API_ID }}
-          export API_HASH=${{ secrets.API_HASH }}
-          export PHONE=${{ secrets.PHONE }}
-
           echo "${{ secrets.SESSION_FILE }}" | base64 -d > session_name.session
 
           if [ -f "payload.bin" ]; then
