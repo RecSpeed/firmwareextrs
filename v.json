@@ -3,12 +3,12 @@
     "boot_img_zip": "true",
     "init_boot_img_zip": "false",
     "vendor_boot_img_zip": "false",
-    "Xiaomi_Settings_apk": "false"
+    "app_settings_zip": "false"
   },
   "marble-ota_full-OS2.0.5.0.VMRCNXM-user-15.0-360119838b": {
     "boot_img_zip": "true",
     "init_boot_img_zip": "false",
     "vendor_boot_img_zip": "true",
-    "Xiaomi_Settings_apk": "true"
+    "app_settings_zip": "true"
   }
 }
