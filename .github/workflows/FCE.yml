@@ -7,126 +7,56 @@ on:
         required: true
       track:
         required: false
+      get:
+        required: true
+
+env:
+  URL: ${{ github.event.inputs.url }}
+  GET: ${{ github.event.inputs.get }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
-    env:
-      URL: ${{ github.event.inputs.url }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      API_ID: ${{ secrets.API_ID }}
-      API_HASH: ${{ secrets.API_HASH }}
-      PHONE: ${{ secrets.PHONE }}
 
-    steps:  
-      - uses: actions/checkout@v4  
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: cache  
-        id: cache  
-        uses: actions/cache@v4  
-        with:  
-          path: |  
-            ~/.local/lib/python3*/site-packages  
-            tools  
-          key: ${{ runner.os }}-cache-${{ hashFiles('**/tools/*') }}  
-          restore-keys: |  
-            ${{ runner.os }}-cache-  
-
-      - name: install  
-        if: steps.cache.outputs.cache-hit != 'true'  
-        run: |  
-          if [ ! -d tools ]; then  
-            sudo apt-get update && sudo apt-get install -y python3-pip p7zip-full aria2  
-            git clone https://github.com/vm03/payload_dumper.git tools  
-            aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip  
-            7z x erofs-utils.zip -otools  
-            pip install -r ./tools/requirements.txt  
-            rm -f erofs-utils.zip  
-            pip install telethon==1.34.0 
-          fi  
-
-      - name: download  
-        run: |  
-          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --log=LOG --out='exrom.zip' "$URL"  
-          7z x exrom.zip -o./  
-          rm exrom.zip  
-
-      - name: EC  
+      - name: Install Dependencies
         run: |
-          echo "${{ secrets.SESSION_FILE }}" | base64 -d > session_name.session
+          sudo apt-get update
+          sudo apt-get install -y python3-pip p7zip-full aria2
+          git clone https://github.com/vm03/payload_dumper.git tools
+          pip install -r ./tools/requirements.txt
 
+      - name: Download Firmware
+        run: |
+          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --out='firmware.zip' "$URL"
+          7z x firmware.zip -o./
+          rm firmware.zip
+
+      - name: Extract Images
+        run: |
           if [ -f "payload.bin" ]; then
-            echo "payload.bin found, extracting images..."
-            for img in boot init_boot vendor_boot system_ext; do
-              echo "Attempting to extract $img..."
-              ./tools/payload_dumper.py --out . --images $img payload.bin || echo "$img not found in payload.bin, skipping..."
-            done
+            echo "payload.bin found, extracting..."
+            ./tools/payload_dumper.py --out . --images boot,recovery payload.bin
           else
-            echo "payload.bin not found, using existing images..."
+            echo "payload.bin not found, checking for raw images..."
           fi
 
+      - name: Create ZIP
+        run: |
           rom_name=$(basename "$URL" .zip)
-          for img in boot init_boot vendor_boot; do
-            if [ -f "$img.img" ]; then
-              7z a "${img}_img_${rom_name}.zip" "$img.img"
-            else
-              echo "$img.img not found, skipping..."
-            fi
-          done
 
-          if [ -f "system_ext.img" ]; then
-            sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-            7z x system_ext.img -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
-            (./tools/extract.erofs -i system_ext.img -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
-            7z a "Settings_apk_${rom_name}.zip" Settings.apk
+          if [ "$GET" = "boot_img" ] && [ -f "boot.img" ]; then
+            7z a "boot_img_${rom_name}.zip" boot.img
+          elif [ "$GET" = "recovery_img" ] && [ -f "recovery.img" ]; then
+            7z a "recovery_img_${rom_name}.zip" recovery.img
           else
-            echo "system_ext.img not found, skipping Settings.apk extraction"
+            echo "Requested image not found"
+            exit 1
           fi
-
-          boot_img="false"
-          init_boot="false"
-          vendor_boot="false"
-          settings_apk="false"
-
-          if [ -f "boot_img_${rom_name}.zip" ]; then
-            boot_img="true"
-          fi
-
-          if [ -f "init_boot_img_${rom_name}.zip" ]; then
-            init_boot="true"
-          fi
-
-          if [ -f "vendor_boot_img_${rom_name}.zip" ]; then
-            vendor_boot="true"
-          fi
-
-          if [ -f "Settings_apk_${rom_name}.zip" ]; then
-            settings_apk="true"
-          fi
-
-          NEW_ENTRY='"'"$rom_name"'": {
-          "boot_img_zip": "'"$boot_img"'",
-          "init_boot_img_zip": "'"$init_boot"'",
-          "vendor_boot_img_zip": "'"$vendor_boot"'",
-          "app_settings_zip": "'"$settings_apk"'",
-          "boot_img_link": "'"$boot_link"'",
-          "processing": "true"
-          }'
-
-
-          if [ ! -f "$FILE" ]; then
-            echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
-          else
-            sed -i '$d' "$FILE"
-            echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
-          fi
-
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add v.json
-          git commit -m "update v.json with $rom_name"
-          git push
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
@@ -134,18 +64,4 @@ jobs:
           tag_name: latest
           files: |
             boot_img_*.zip
-            init_boot_img_*.zip
-            vendor_boot_img_*.zip
-            Settings_apk_*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: End of process
-        run: |
-          echo "Summary of available files:"
-          [ "$boot_img" = "true" ] && echo "boot.img Available in: t.me/boot_img_zip || release"
-          [ "$init_boot" = "true" ] && echo "init_boot.img Available"
-          [ "$vendor_boot" = "true" ] && echo "vendor_boot.img Available"
-          [ "$settings_apk" = "true" ] && echo "settings.apk Available"
-        continue-on-error: true
-
+            recovery_img_*.zip
