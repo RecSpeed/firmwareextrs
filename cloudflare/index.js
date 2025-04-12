@@ -31,7 +31,7 @@ export default {
       }
     } else {
       return new Response(
-        "\nMissing parameters!\n\nUsage: \ncurl fce.gmrec72.workers.dev?url=<url>\n\nExample:\n curl fce.gmrec72.workers.dev?url=https://example.com/rom.zip\n\n",
+        "\nMissing parameters!\n\nUsage:\ncurl fce.gmrec72.workers.dev?url=<url>\n\nExample:\ncurl fce.gmrec72.workers.dev?url=https://example.com/rom.zip\n\n",
         { status: 400 }
       );
     }
@@ -44,27 +44,30 @@ export default {
     const fileName = url.split("/").pop();
 
     try {
-      const Name = url.split("/").pop().split(".zip")[0];
-      const vJsonResponse = await fetch(
-          "https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json"
-      );
+      const Name = fileName.split(".zip")[0];
+      const vJsonResponse = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
       if (vJsonResponse.ok) {
         const data = await vJsonResponse.json();
-        let foundKey = null;
         for (const key in data) {
           if (key.startsWith(Name)) {
-            foundKey = key;
-            const values = data[foundKey];
+            const values = data[key];
+
+            // Eğer Release linki varsa ve boot_img_zip true ise, doğrudan linki dön
+            if (values.boot_img_zip === "true" && values.boot_img_link) {
+              return new Response(`link: ${values.boot_img_link}`, { status: 200 });
+            }
+
+            // Aksi halde Telegram varsa göster (isteğe bağlı)
             let telegramLinks = [];
             for (const [k, v] of Object.entries(values)) {
-              if (v === "true") {
+              if (v === "true" && k.endsWith("_zip")) {
                 telegramLinks.push(`Available in: t.me/${k}`);
               }
             }
             if (telegramLinks.length > 0) {
               return new Response(`\n${telegramLinks.join("\n")}\n`, { status: 200 });
             } else {
-              return new Response(`\nNo Telegram links found for ${Name}\n`, { status: 200 });
+              return new Response(`\nNo files found for ${Name}\n`, { status: 200 });
             }
           }
         }
@@ -73,6 +76,7 @@ export default {
       return new Response(`Error: ${error}`, { status: 500 });
     }
 
+    // Eğer daha önce işlenmemişse → GitHub Actions tetiklenir
     const headers = {
       Authorization: `token ${env.GTKK}`,
       Accept: "application/vnd.github.v3+json",
