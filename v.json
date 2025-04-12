@@ -4,4 +4,4 @@
   "vendor_boot_img_zip": "'$vendor_boot'",
   "app_settings_zip": "'$settings_apk'",
   "boot_img_link": "'$boot_link'"
-}'
+}
