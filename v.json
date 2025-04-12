@@ -4,10 +4,3 @@
   "vendor_boot_img_zip": "false",
   "app_settings_zip": "false"
 }
-,
-"miui_TUCANA_V12.0.2.0.QFDCNXM_88649617b1_12.0": {
-  "boot_img_zip": "true",
-  "init_boot_img_zip": "false",
-  "vendor_boot_img_zip": "false",
-  "app_settings_zip": "false"
-}
