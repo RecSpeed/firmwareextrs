@@ -56,6 +56,10 @@ jobs:
           API_HASH: ${{ secrets.API_HASH }}  
           PHONE: ${{ secrets.PHONE }}
         run: |
+          export API_ID=${{ secrets.API_ID }}
+          export API_HASH=${{ secrets.API_HASH }}
+          export PHONE=${{ secrets.PHONE }}
+
           echo "${{ secrets.SESSION_FILE }}" | base64 -d > session_name.session
 
           if [ -f "payload.bin" ]; then
@@ -91,8 +95,6 @@ jobs:
           vendor_boot="false"
           settings_apk="false"
 
-
-
           if [ -f "boot_img_${rom_name}.zip" ]; then
             python upload.py @boot_img_zip_rs "boot_img_${rom_name}.zip"
             boot_img="true"
@@ -121,7 +123,6 @@ jobs:
             "app_settings_zip": "'$settings_apk'"
           }'
 
-
           if [ ! -f "$FILE" ]; then
             echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
           else
@@ -139,8 +140,6 @@ jobs:
           echo "init_boot=$init_boot" >> output.env
           echo "vendor_boot=$vendor_boot" >> output.env
           echo "settings_apk=$settings_apk" >> output.env
-
-
 
       - name: End of process
         run: |
