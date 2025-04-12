@@ -105,14 +105,14 @@ jobs:
             settings_apk="true"
           fi
 
-NEW_ENTRY='"'"$rom_name"'": {
-  "boot_img_zip": "'"$boot_img"'",
-  "init_boot_img_zip": "'"$init_boot"'",
-  "vendor_boot_img_zip": "'"$vendor_boot"'",
-  "app_settings_zip": "'"$settings_apk"'",
-  "boot_img_link": "'"$boot_link"'",
-  "processing": "true"
-}'
+          NEW_ENTRY='"'"$rom_name"'": {
+          "boot_img_zip": "'"$boot_img"'",
+          "init_boot_img_zip": "'"$init_boot"'",
+          "vendor_boot_img_zip": "'"$vendor_boot"'",
+          "app_settings_zip": "'"$settings_apk"'",
+          "boot_img_link": "'"$boot_link"'",
+          "processing": "true"
+          }'
 
 
           if [ ! -f "$FILE" ]; then
