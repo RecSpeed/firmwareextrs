@@ -141,7 +141,9 @@ jobs:
       - name: End of process
         run: |
           echo "Summary of available files:"
-          [ "$boot_img" = "true" ] && echo "boot.img Ready"
-          [ "$init_boot" = "true" ] && echo "init_boot.img Ready"
-          [ "$vendor_boot" = "true" ] && echo "vendor_boot.img Ready"
-          [ "$settings_apk" = "true" ] && echo "settings.apk Ready"
+          [ "$boot_img" = "true" ] && echo "boot.img Available in: t.me/boot_img_zip || release"
+          [ "$init_boot" = "true" ] && echo "init_boot.img Available"
+          [ "$vendor_boot" = "true" ] && echo "vendor_boot.img Available"
+          [ "$settings_apk" = "true" ] && echo "settings.apk Available"
+        continue-on-error: true
+
