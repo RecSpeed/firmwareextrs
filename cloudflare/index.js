@@ -31,7 +31,7 @@ export default {
       }
     } else {
       return new Response(
-        "\nMissing parameters!\n\nUsage: \ncurl fce.offici5l.workers.dev?url=<url>\n\nExample:\n curl fce.offici5l.workers.dev?url=https://example.com/rom.zip\n\n",
+        "\nMissing parameters!\n\nUsage: \ncurl fce.gmrec72.workers.dev?url=<url>\n\nExample:\n curl fce.gmrec72.workers.dev?url=https://example.com/rom.zip\n\n",
         { status: 400 }
       );
     }
@@ -81,7 +81,7 @@ export default {
     };
 
     const BaseUrl =
-      "https://api.github.com/repos/offici5l/Firmware-Content-Extractor/actions/workflows/FCE.yml";
+      "https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml";
     const githubDispatchUrl = `${BaseUrl}/dispatches`;
     const TRACK_URL = `${BaseUrl}/runs`;
 
