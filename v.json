@@ -1,20 +1,11 @@
-{
-  "miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0": {
-    "boot_img_zip": "true",
-    "init_boot_img_zip": "false",
-    "vendor_boot_img_zip": "false",
-    "app_settings_zip": "false",
-    "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0.zip"
-  }
-,
-"miui_TUCANA_V12.0.2.0.QFDCNXM_88649617b1_10.0": {
+"miui_TUCANA_V12.0.2.0.QFDCNXM_88649617b1_11.0": {
   "boot_img_zip": "true",
   "init_boot_img_zip": "false",
   "vendor_boot_img_zip": "false",
   "app_settings_zip": "false"
 }
 ,
-"miui_TUCANA_V12.0.2.0.QFDCNXM_88649617b1_10.0": {
+"miui_TUCANA_V12.0.2.0.QFDCNXM_88649617b1_12.0": {
   "boot_img_zip": "true",
   "init_boot_img_zip": "false",
   "vendor_boot_img_zip": "false",
