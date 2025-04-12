@@ -46,7 +46,7 @@ export default {
     try {
       const Name = url.split("/").pop().split(".zip")[0];
       const vJsonResponse = await fetch(
-        "https://raw.githubusercontent.com/offici5l/Firmware-Content-Extractor/main/v.json"
+          "https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json"
       );
       if (vJsonResponse.ok) {
         const data = await vJsonResponse.json();
