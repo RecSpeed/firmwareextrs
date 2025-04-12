@@ -44,21 +44,21 @@ export default {
 
     try {
       const vJsonResponse = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-      if (vJsonResponse.ok) {
-        const data = await vJsonResponse.json();
-        for (const key in data) {
-          if (key.startsWith(Name)) {
-            const values = data[key];
+if (vJsonResponse.ok) {
+  const data = await vJsonResponse.json();
+  for (const key in data) {
+    if (key.startsWith(Name)) {
+      const values = data[key];
 
-            // Sadece boot_img_link varsa dön
-            if (values.boot_img_zip === "true" && values.boot_img_link) {
-              return new Response(`link: ${values.boot_img_link}`, { status: 200 });
-            }
-
-            return new Response("No boot_img_link found for this firmware.", { status: 200 });
-          }
-        }
+      if (values.boot_img_zip === "true" && values.boot_img_link) {
+        return new Response(`link: ${values.boot_img_link}`, { status: 200 });
       }
+
+      // Bu firmware için daha önce bir işlem başlatılmış ama henüz tamamlanmamış olabilir
+      return new Response("Track progress: already running for this firmware", { status: 202 });
+    }
+  }
+}
     } catch (error) {
       return new Response(`Error parsing v.json: ${error}`, { status: 500 });
     }
