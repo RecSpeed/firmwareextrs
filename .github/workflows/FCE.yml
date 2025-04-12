@@ -91,6 +91,8 @@ jobs:
           vendor_boot="false"
           settings_apk="false"
 
+
+
           if [ -f "boot_img_${rom_name}.zip" ]; then
             python upload.py @boot_img_zip "boot_img_${rom_name}.zip"
             boot_img="true"
@@ -107,7 +109,7 @@ jobs:
           fi
 
           if [ -f "Settings_apk_${rom_name}.zip" ]; then
-            python upload.py @Xiaomi_Settings_apk "Settings_apk_${rom_name}.zip"
+            python upload.py @app_settings_zip "Settings_apk_${rom_name}.zip"
             settings_apk="true"
           fi
 
@@ -116,7 +118,7 @@ jobs:
             "boot_img_zip": "'$boot_img'",
             "init_boot_img_zip": "'$init_boot'",
             "vendor_boot_img_zip": "'$vendor_boot'",
-            "Xiaomi_Settings_apk": "'$settings_apk'"
+            "app_settings_zip": "'$settings_apk'"
           }'
 
 
@@ -133,4 +135,17 @@ jobs:
           git commit -m "update v.json with $rom_name"
           git push
 
+          echo "boot_img=$boot_img" >> output.env
+          echo "init_boot=$init_boot" >> output.env
+          echo "vendor_boot=$vendor_boot" >> output.env
+          echo "settings_apk=$settings_apk" >> output.env
 
+
+
+      - name: End of process
+        run: |
+          echo "Summary of available files:"
+          [ "$boot_img" = "true" ] && echo "boot.img Available in: t.me/boot_img_zip"
+          [ "$init_boot" = "true" ] && echo "init_boot.img Available in: t.me/init_boot_img_zip"
+          [ "$vendor_boot" = "true" ] && echo "vendor_boot.img Available in: t.me/vendor_boot_img_zip"
+          [ "$settings_apk" = "true" ] && echo "settings.apk Available in: t.me/app_settings_zip"
