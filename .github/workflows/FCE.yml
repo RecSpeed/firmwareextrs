@@ -10,6 +10,7 @@ on:
       get:
         required: true
 
+
 env:
   URL: ${{ github.event.inputs.url }}
   GET: ${{ github.event.inputs.get }}
