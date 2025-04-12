@@ -110,7 +110,8 @@ jobs:
             "boot_img_zip": "'$boot_img'",
             "init_boot_img_zip": "'$init_boot'",
             "vendor_boot_img_zip": "'$vendor_boot'",
-            "app_settings_zip": "'$settings_apk'"
+            "app_settings_zip": "'$settings_apk'",
+            "processing": "true"
           }'
 
           if [ ! -f "$FILE" ]; then
