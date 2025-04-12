@@ -1,22 +1,9 @@
 export default {
   async fetch(req, env) {
     const urlParams = new URLSearchParams(req.url.split("?")[1]);
-    const url = urlParams.get("url");
-    const get = urlParams.get("get"); // boot_img veya recovery_img
+    const get = urlParams.get("get");
+    let url = urlParams.get("url");
 
-    if (!url || !get || !["boot_img", "recovery_img"].includes(get)) {
-      return new Response(
-        "\nMissing or invalid parameters!\n\nUsage:\n?get=boot_img&url=<firmware_url>\n",
-        { status: 400 }
-      );
-    }
-
-    // .zip kontrolü
-    if (!url.includes(".zip")) {
-      return new Response("Only .zip URLs are supported.", { status: 400 });
-    }
-
-    // Desteklenen domain rewrite
     const domains = [
       "ultimateota.d.miui.com",
       "superota.d.miui.com",
@@ -27,6 +14,21 @@ export default {
       "cdn-ota.azureedge.net",
       "airtel.bigota.d.miui.com",
     ];
+
+    // ⚠️ Parametre kontrolü
+    if (!url || !get) {
+      return new Response(
+        "\nMissing parameters!\nUsage:\n?get=boot_img&url=<firmware_url>\n",
+        { status: 400 }
+      );
+    }
+
+    // Sadece .zip desteklenir
+    if (!url.includes(".zip")) {
+      return new Response("\nOnly .zip URLs are supported.\n", { status: 400 });
+    }
+
+    // Domain rewrite
     for (const domain of domains) {
       if (url.includes(domain)) {
         url = url.replace(
@@ -37,25 +39,34 @@ export default {
       }
     }
 
+    // URL geçerli mi kontrol et
+    const headCheck = await fetch(url, { method: "HEAD" });
+    if (!headCheck.ok) {
+      return new Response("\nThe provided URL is not accessible.\n", { status: 400 });
+    }
+
     const fileName = url.split("/").pop();
-    const baseName = fileName.split(".zip")[0];
-    const assetName = `${get}_${baseName}.zip`;
-    const releaseUrl = `https://github.com/RecSpeed/firmwareextrs/releases/download/latest/${assetName}`;
+    const romKey = fileName.replace(".zip", "");
 
-    // ✅ 1. Release'de var mı kontrol et
-    const releaseCheck = await fetch(releaseUrl, { method: "HEAD" });
-    if (releaseCheck.ok) {
-      return new Response(`link: ${releaseUrl}`, { status: 200 });
+    // 🔁 KV: Önce var mı kontrol et (Release varsa dön)
+    const existing = await env.FCE_KV.get(`${get}:${romKey}`);
+    if (existing) {
+      return new Response(`link: ${existing}`, { status: 200 });
     }
 
-    // 🔁 2. Daha önce başlatılmış mı kontrol et (3 dakika cache)
-    const key = btoa(`${get}|${url}`);
-    const activeTrack = await env.FCE_KV.get(key);
-    if (activeTrack) {
-      return new Response(`Track progress: ${activeTrack}`, { status: 200 });
+    // ⏳ Track süresi içinde mi?
+    const pending = await env.FCE_KV.get(`pending:${get}:${romKey}`);
+    if (pending) {
+      return new Response(`\nAlready processing...\n${pending}`, { status: 200 });
     }
 
-    // 🧠 3. Yoksa yeni GitHub Action tetikle
+    // 🔄 GitHub Actions trigger
+    const trackId = Date.now().toString();
+    await env.FCE_KV.put(`pending:${get}:${romKey}`, `Tracking: ${trackId}`, { expirationTtl: 180 });
+
+    const githubDispatchUrl =
+      "https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches";
+
     const headers = {
       Authorization: `token ${env.GTKK}`,
       Accept: "application/vnd.github.v3+json",
@@ -63,28 +74,24 @@ export default {
       "User-Agent": "Cloudflare Worker",
     };
 
-    const trackId = Date.now().toString();
-    const dispatchUrl = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`;
-    const trackLink = `https://github.com/RecSpeed/firmwareextrs/actions/runs`;
-
     const body = {
       ref: "main",
-      inputs: { url, track: trackId, get },
+      inputs: { url, get, track: trackId }
     };
 
-    const ghRes = await fetch(dispatchUrl, {
+    const dispatch = await fetch(githubDispatchUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
     });
 
-    if (ghRes.ok) {
-      // Yeni track’i cache’le (180 saniye = 3 dakika)
-      await env.FCE_KV.put(key, trackLink, { expirationTtl: 180 });
-      return new Response(`Track progress: ${trackLink}`, { status: 200 });
-    } else {
-      const errText = await ghRes.text();
-      return new Response(`GitHub Error: ${errText}`, { status: 500 });
+    if (!dispatch.ok) {
+      const errorText = await dispatch.text();
+      return new Response(`GitHub Response Error: ${errorText}`, { status: 500 });
     }
+
+    return new Response(`\nTrack progress: https://github.com/RecSpeed/firmwareextrs/actions\n`, {
+      status: 200,
+    });
   },
 };
