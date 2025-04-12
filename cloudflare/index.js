@@ -1,17 +1,12 @@
 export default {
   async fetch(req, env) {
-    const urlParams = new URL(req.url).searchParams;
-    const get = urlParams.get("get");
+    const urlParams = new URLSearchParams(req.url.split("?")[1]);
     let url = urlParams.get("url");
+    let get = urlParams.get("get");
 
-    if (!url || !get) {
-      return new Response("Missing required 'url' or 'get' parameter", { status: 400 });
-    }
-
-    const allowedGets = ["boot_img", "recovery_img"];
-    if (!allowedGets.includes(get)) {
-      return new Response(`Only these values are allowed for 'get': ${allowedGets.join(", ")}`, { status: 400 });
-    }
+    // 🧪 Log parametreler
+    console.log("Incoming Request → URL:", url);
+    console.log("Incoming Request → GET:", get);
 
     const domains = [
       "ultimateota.d.miui.com",
@@ -24,46 +19,47 @@ export default {
       "airtel.bigota.d.miui.com",
     ];
 
-    if (!url.includes(".zip")) {
-      return new Response("Only .zip URLs are supported", { status: 400 });
-    }
-
-    for (const domain of domains) {
-      if (url.includes(domain)) {
-        url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
-        break;
+    if (url) {
+      if (url.includes(".zip")) {
+        url = url.split(".zip")[0] + ".zip";
+      } else {
+        return new Response("\nOnly .zip URLs are supported.\n", { status: 400 });
       }
-    }
 
-    const Name = url.split("/").pop().replace(".zip", "");
-    const cacheKey = `${Name}_${get}`;
-
-    // 1. KV’de varsa (başarılı link) → doğrudan dön
-    const kvValue = await env.FCE_KV.get(cacheKey);
-    if (kvValue && kvValue !== "processing") {
-      return new Response(`link: ${kvValue}`, { status: 200 });
-    }
-
-    // 2. Eğer hâlâ işleniyor durumundaysa beklet
-    if (kvValue === "processing") {
-      return new Response("Currently processing, please wait...", { status: 202 });
-    }
-
-    // 3. Release'te varsa (v.json üzerinden kontrol)
-    try {
-      const vJsonRes = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-      const vData = await vJsonRes.json();
-      if (vData[Name] && vData[Name][`${get}_zip`] === "true" && vData[Name][`${get}_link`]) {
-        await env.FCE_KV.put(cacheKey, vData[Name][`${get}_link`]); // kalıcı olarak kaydet
-        return new Response(`link: ${vData[Name][`${get}_link`]}`, { status: 200 });
+      for (const domain of domains) {
+        if (url.includes(domain)) {
+          url = url.replace(
+            domain,
+            "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com"
+          );
+          break;
+        }
       }
-    } catch (err) {
-      // v.json hatası varsa geç
+    } else {
+      return new Response(
+        "\nMissing parameters!\n\nUsage:\ncurl fce.gmrec72.workers.dev?get=boot_img&url=<url>\n\nExample:\ncurl fce.gmrec72.workers.dev?get=boot_img&url=https://example.com/rom.zip\n\n",
+        { status: 400 }
+      );
     }
 
-    // 4. Eğer yukarıdakilerin hiçbiri değilse → yeni görev başlat
-    await env.FCE_KV.put(cacheKey, "processing", { expirationTtl: 180 }); // geçici flag (3 dakika)
+    const response = await fetch(url, { method: "HEAD" });
+    if (!response.ok) {
+      return new Response("\nThe provided URL is not accessible.\n", { status: 400 });
+    }
 
+    const fileName = url.split("/").pop();
+    const romName = fileName.split(".zip")[0];
+
+    // KV ile check et
+    const trackKey = `processing_${romName}_${get}`;
+    const existingTrack = await env.FCE_KV.get(trackKey);
+
+    if (existingTrack) {
+      console.log("⚠️ Existing task found in KV:", existingTrack);
+      return new Response(`\n⚙️ Already processing...\nTrack progress: ${existingTrack}`, { status: 200 });
+    }
+
+    // GitHub tetikleme
     const headers = {
       Authorization: `token ${env.GTKK}`,
       Accept: "application/vnd.github.v3+json",
@@ -78,8 +74,15 @@ export default {
     const track = Date.now().toString();
     const data = {
       ref: "main",
-      inputs: { url, track, get },
+      inputs: {
+        url,
+        track,
+        get
+      }
     };
+
+    // 🧪 Log GitHub’a yollanacak veri
+    console.log("Dispatch Data →", JSON.stringify(data));
 
     try {
       const githubResponse = await fetch(githubDispatchUrl, {
@@ -89,16 +92,20 @@ export default {
       });
 
       if (githubResponse.ok) {
-        // kullanıcıya takip bağlantısını döndür
-        return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, {
+        // ✔️ Görev başarılı tetiklendi, KV’ye yaz
+        await env.FCE_KV.put(trackKey, `${BaseUrl}/runs`, { expirationTtl: 180 }); // 3 dakika beklesin
+
+        return new Response(`\n✅ Build started for ${romName} [${get}]\nTrack progress: ${BaseUrl}/runs\n`, {
           status: 200,
         });
       } else {
-        const githubError = await githubResponse.text();
-        return new Response(`GitHub Response Error: ${githubError}`, { status: 500 });
+        const githubResponseText = await githubResponse.text();
+        return new Response(`GitHub Response Error: ${githubResponseText}`, {
+          status: 500,
+        });
       }
     } catch (error) {
-      return new Response(`Dispatch Error: ${error.message}`, { status: 500 });
+      return new Response(`Error: ${error.message}`, { status: 500 });
     }
   },
 };
