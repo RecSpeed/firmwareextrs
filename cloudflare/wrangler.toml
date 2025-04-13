@@ -1,6 +1,3 @@
 name = "fce"
 main = "index.js"
 compatibility_date = "2024-11-23"
-
-[build]
-command = "echo Skipping build"
