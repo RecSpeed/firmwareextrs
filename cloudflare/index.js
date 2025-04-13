@@ -4,11 +4,9 @@ export default {
     const get = urlParams.get("get");
     let url = urlParams.get("url");
 
-    if (!url || !get) {
-      return new Response("Missing 'get' or 'url' parameter.", { status: 400 });
-    }
+    if (!url || !get) return new Response("Missing 'get' or 'url' parameter.", { status: 400 });
 
-    // 🌐 CDN düzeltme
+    // CDN düzeltme
     const domains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
       "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
@@ -20,19 +18,17 @@ export default {
       }
     }
 
-    if (!url.includes(".zip")) {
-      return new Response("Only .zip URLs are supported.", { status: 400 });
-    }
+    if (!url.includes(".zip")) return new Response("Only .zip URLs are supported.", { status: 400 });
 
     url = url.split(".zip")[0] + ".zip";
     const name = url.split("/").pop().replace(".zip", "");
     const kvKey = `${get}:${name}`;
 
-    // 1️⃣ KV'den son işleme ait track id'sini al
+    // KV'den son işlem ID'si
     const lastTrack = await env.FCE_KV.get(kvKey);
 
-    // 2️⃣ Release kontrolü
-    const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+    // Release kontrolü
+    const releaseRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto`, {
       headers: {
         Authorization: `token ${env.GTKK}`,
         Accept: "application/vnd.github.v3+json",
@@ -42,33 +38,28 @@ export default {
 
     if (releaseRes.ok) {
       const release = await releaseRes.json();
-      const expectedName = `${get}_${name}.zip`;
-      const asset = release.assets.find(a => a.name === expectedName);
-      if (asset) {
-        return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
-      }
+      const asset = release.assets.find(a => a.name === `${get}_${name}.zip`);
+      if (asset) return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
     }
 
-    // 2.5️⃣ v.json: başarısız kayıt varsa
+    // v.json kontrolü
     try {
       const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
       if (vjson.ok) {
         const data = await vjson.json();
-        const match = Object.entries(data).find(([k]) => k === name);
-        if (match) {
-          const [, values] = match;
-          if (values[`${get}_zip`] === "false") {
-            return new Response(`❌ Requested image (${get}) not found`, { status: 404 });
+        const entry = Object.entries(data).find(([k]) => k.startsWith(name));
+        if (entry) {
+          const [, val] = entry;
+          if (val[`${get}_zip`] === "false") {
+            return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
           }
         }
       }
-    } catch (_) {
-      // ignore JSON parse errors
-    }
+    } catch (_) {}
 
-    // 3️⃣ Eski track varsa durumunu kontrol et
+    // Eğer track ID varsa ve işlem tamamlandıysa sonucu oku
     if (lastTrack) {
-      const runsRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs", {
+      const runsRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`, {
         headers: {
           Authorization: `token ${env.GTKK}`,
           Accept: "application/vnd.github.v3+json",
@@ -77,29 +68,30 @@ export default {
       });
 
       if (runsRes.ok) {
-        const runsData = await runsRes.json();
-        const relatedRun = runsData.workflow_runs.find(run =>
-          run.head_branch === "main" && run.name === lastTrack
-        );
-
-        if (relatedRun && relatedRun.status === "completed") {
-          if (relatedRun.conclusion === "failure") {
+        const runs = await runsRes.json();
+        const run = runs.workflow_runs.find(w => w.name === lastTrack);
+        if (run && run.status === "completed") {
+          if (run.conclusion === "failure") {
             return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
-          } else if (relatedRun.conclusion === "success") {
+          } else {
             return new Response(`Track complete. Check release.`, { status: 200 });
           }
         }
 
-        if (relatedRun) {
-          return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions/runs/${relatedRun.id}`, { status: 202 });
+        // Henüz bitmemişse
+        if (run) {
+          return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions/runs/${run.id}`, {
+            status: 202
+          });
         }
       }
     }
 
-    // 4️⃣ Yeni işleme başla
+    // Yeni track ID oluştur
     const newTrack = Date.now().toString();
     await env.FCE_KV.put(kvKey, newTrack, { expirationTtl: 180 });
 
+    // Dispatch
     const dispatchRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
       method: "POST",
       headers: {
