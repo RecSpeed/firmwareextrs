@@ -7,17 +7,18 @@ on:
         required: true
       track:
         required: false
-      image_type:  # Yeni input
-        required: false
-        default: 'boot_img'
+      image_type:
+        required: true
+        default: 'boot'
+        description: 'Image type to extract (boot, recovery, modem)'
 
 jobs:
-  FCE:
+  extract_image:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
     env:
       URL: ${{ github.event.inputs.url }}
-      IMAGE_TYPE: ${{ github.event.inputs.image_type || 'boot_img' }}
+      IMAGE_TYPE: ${{ github.event.inputs.image_type }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -41,29 +42,76 @@ jobs:
           cd extracted
           rom_name=$(basename "$URL" .zip)
           mkdir -p ../release
+          found_files=""
 
-          if [ "$IMAGE_TYPE" = "boot_img" ]; then
-            if [ -f "boot.img" ]; then
-              echo "Found boot.img directly in ZIP."
-              7z a "../release/boot_img_${rom_name}.zip" "boot.img"
-            elif [ -f "payload.bin" ]; then
-              echo "Extracting boot.img from payload.bin..."
-              ../tools/payload_dumper.py --out . --images boot payload.bin
-              if [ -f "boot.img" ]; then
-                7z a "../release/boot_img_${rom_name}.zip" "boot.img"
-              else
-                echo "boot.img not found in payload."
-                exit 1
-              fi
-            else
-              echo "Neither boot.img nor payload.bin found."
+          case "$IMAGE_TYPE" in
+            "boot")
+              search_files=("boot.img")
+              output_file="boot_img_${rom_name}.zip"
+              ;;
+            "recovery")
+              search_files=("recovery.img")
+              output_file="recovery_img_${rom_name}.zip"
+              ;;
+            "modem")
+              search_files=("NON-HLOS.bin" "md1img.img" "modem.bin")
+              output_file="modem_img_${rom_name}.zip"
+              ;;
+            *)
+              echo "Unsupported image type: $IMAGE_TYPE"
               exit 1
+              ;;
+          esac
+
+          # Check in extracted files first
+          for file in "${search_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "Found $file directly in ZIP."
+              7z a "../release/$output_file" "$file"
+              found_files="true"
+              break
             fi
-          elif [ "$IMAGE_TYPE" = "recovery_img" ]; then
-            if [ -f "recovery.img" ]; then
-              echo "Found recovery.img directly in ZIP."
-              7z a "../release/recovery_img_${rom_name}.zip" "recovery.img"
-            elif [ -f "payload.bin" ]; then
-              echo "Extracting recovery.img from payload.bin..."
-              ../tools/payload_dumper.py --out . --images recovery payload.bin
-             
+          done
+
+          # If not found, check payload.bin
+          if [ -z "$found_files" ] && [ -f "payload.bin" ]; then
+            echo "Extracting from payload.bin..."
+            
+            if [ "$IMAGE_TYPE" = "modem" ]; then
+              ../tools/payload_dumper.py --out . --images modem* payload.bin || true
+              for file in "${search_files[@]}"; do
+                if [ -f "$file" ]; then
+                  7z a "../release/$output_file" "$file"
+                  found_files="true"
+                  break
+                fi
+              done
+            else
+              ../tools/payload_dumper.py --out . --images $IMAGE_TYPE payload.bin
+              if [ -f "$IMAGE_TYPE.img" ]; then
+                7z a "../release/$output_file" "$IMAGE_TYPE.img"
+                found_files="true"
+              fi
+            fi
+          fi
+
+          if [ -z "$found_files" ]; then
+            echo "Error: No $IMAGE_TYPE files found in: ${search_files[*]}"
+            exit 1
+          fi
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: auto
+          files: release/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Completion Status
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✔️ $IMAGE_TYPE image extracted successfully"
+          else
+            echo "❌ Failed to extract $IMAGE_TYPE image"
+          fi
