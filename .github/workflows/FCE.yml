@@ -5,15 +5,14 @@ on:
     inputs:
       url:
         required: true
-      get:
-        required: true
       track:
         required: false
+      get:
+        required: true
 
 env:
   URL: ${{ github.event.inputs.url }}
   GET: ${{ github.event.inputs.get }}
-  TRACK: ${{ github.event.inputs.track }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
@@ -24,22 +23,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          sudo apt update
-          sudo apt install -y python3-pip p7zip-full aria2
+          sudo apt-get update
+          sudo apt-get install -y python3-pip p7zip-full aria2
           git clone https://github.com/vm03/payload_dumper.git tools
-          pip install -r tools/requirements.txt
+          pip install -r ./tools/requirements.txt
 
-      - name: Download firmware
+      - name: Download Firmware
         run: |
-          aria2c -x 7 -s 7 --out=firmware.zip "$URL"
-          7z x firmware.zip -o./
-          rm firmware.zip
+          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --out='firmware.zip' "$URL"
+          7z x firmware.zip -o./ || true
+          rm -f firmware.zip
 
-      - name: Extract images
+      - name: Extract Images
         run: |
           if [ -f "payload.bin" ]; then
+            echo "payload.bin found, extracting..."
             ./tools/payload_dumper.py --out . --images boot,recovery payload.bin
           else
             echo "payload.bin not found"
@@ -49,7 +49,6 @@ jobs:
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
-
           if [ "$GET" = "boot_img" ] && [ -f "boot.img" ]; then
             7z a "./release/boot_img_${rom_name}.zip" boot.img
           elif [ "$GET" = "recovery_img" ] && [ -f "recovery.img" ]; then
@@ -59,8 +58,8 @@ jobs:
 
             FILE="v.json"
             NEW_ENTRY='"'${rom_name}'": {
-  "'${GET}'_zip": "false"
-}'
+              "'${GET}'_zip": "false"
+            }'
 
             if [ ! -f "$FILE" ]; then
               echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
@@ -92,9 +91,9 @@ jobs:
           link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
 
           NEW_ENTRY='"'${rom_name}'": {
-  "'${GET}'_zip": "true",
-  "'${GET}'_link": "'${link}'"
-}'
+            "'${GET}'_zip": "true",
+            "'${GET}'_link": "'${link}'"
+          }'
 
           if [ ! -f "$FILE" ]; then
             echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
@@ -106,9 +105,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add v.json
-          git commit -m "update ${GET} for $rom_name"
+          git commit -m "update $GET for $rom_name"
           git push
-
-      - name: Done
-        run: echo "✅ Done for $GET"
-        continue-on-error: true
