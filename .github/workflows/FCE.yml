@@ -13,7 +13,7 @@ on:
 env:
   URL: ${{ github.event.inputs.url }}
   GET: ${{ github.event.inputs.get || 'boot_img' }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_TOKEN: ${{ secrets.GTKK }}
 
 jobs:
   FCE:
@@ -61,7 +61,7 @@ jobs:
           tag_name: auto
           files: release/boot_img_*.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GTKK }}
 
       - name: ✅ Done
         run: echo "✔️ boot_img extraction and upload completed."
