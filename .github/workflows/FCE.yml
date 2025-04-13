@@ -5,66 +5,57 @@ on:
     inputs:
       url:
         required: true
+      get:
+        required: true
       track:
-        required: false
-
-env:
-  URL: ${{ github.event.inputs.url }}
-  GITHUB_TOKEN: ${{ secrets.GTKK }}
+        required: true
 
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
 
+    env:
+      URL: ${{ github.event.inputs.url }}
+      GET: ${{ github.event.inputs.get }}
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local/lib/python3*/site-packages
-            tools
-          key: ${{ runner.os }}-cache-${{ hashFiles('**/tools/*') }}
-          restore-keys: |
-            ${{ runner.os }}-cache-
-
-      - name: Install dependencies
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Install Tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip p7zip-full aria2
+          sudo apt update
+          sudo apt install -y aria2 p7zip-full python3-pip
           git clone https://github.com/vm03/payload_dumper.git tools
-          pip install -r ./tools/requirements.txt
-          pip install telethon==1.34.0
+          pip install -r tools/requirements.txt
 
-      - name: Download firmware
+      - name: Download & Extract
         run: |
-          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --log=LOG --out='exrom.zip' "$URL"
-          7z x exrom.zip -o./
-          rm exrom.zip
+          aria2c -x 8 -s 8 -k 1M "$URL" -o rom.zip
+          7z x rom.zip
+          rm rom.zip
 
-      - name: Extract boot.img
-        run: |
-          if [ -f "payload.bin" ]; then
-            ./tools/payload_dumper.py --out . --images boot payload.bin
-          else
-            echo "payload.bin not found"
-            exit 1
-          fi
-
-      - name: Create ZIP
+      - name: Extract boot image
         run: |
           rom_name=$(basename "$URL" .zip)
-          mkdir -p release
-          7z a "./release/boot_img_${rom_name}.zip" boot.img
+          if [ -f payload.bin ]; then
+            python3 tools/payload_dumper.py --out . --images $GET payload.bin
+            if [ -f "$GET.img" ]; then
+              7z a "${GET}_${rom_name}.zip" "$GET.img"
+            else
+              echo "$GET.img not extracted."
+              exit 1
+            fi
+          else
+            echo "payload.bin not found."
+            exit 1
+          fi
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: release/*.zip
+          files: |
+            boot_img_*.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GTKK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
