@@ -3,14 +3,14 @@ export default {
     try {
       const urlParams = new URL(req.url, "https://dummy.url").searchParams;
       let url = urlParams.get("url");
-      const imageType = urlParams.get("type") || "boot"; // boot, recovery, modem
+      const imageType = urlParams.get("type")?.toLowerCase() || "boot";
 
-      // Geçerli image tiplerini kontrol et
+      // Valid image types
       const validTypes = ["boot", "recovery", "modem"];
       if (!validTypes.includes(imageType)) {
         return jsonResponse(400, {
           status: "error",
-          message: `Invalid 'type' parameter. Use: ${validTypes.join(", ")}`
+          message: `Invalid 'type' parameter. Valid types: ${validTypes.join(", ")}`
         });
       }
 
@@ -21,15 +21,18 @@ export default {
         });
       }
 
+      // Normalize URL
       url = url.split(".zip")[0] + ".zip";
       const name = url.split("/").pop().replace(".zip", "");
 
       // CDN domain replacement
       const cdnDomains = [
-        "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
-        "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
+        "ultimateota.d.miui.com", "superota.d.miui.com", 
+        "bigota.d.miui.com", "cdnorg.d.miui.com",
+        "bn.d.miui.com", "hugeota.d.miui.com",
         "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
       ];
+      
       for (const domain of cdnDomains) {
         if (url.includes(domain)) {
           url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
@@ -59,13 +62,13 @@ export default {
         }
       }
 
+      // Check KV for existing process
       const kvKey = `${imageType}:${name}`;
       const existingTrack = await env.FCE_KV.get(kvKey);
-
       if (existingTrack) {
         return jsonResponse(200, {
           status: "processing",
-          tracking_url: `https://github.com/RecSpeed/firmwareextrs/actions`,
+          tracking_url: "https://github.com/RecSpeed/firmwareextrs/actions",
           message: `Already processing ${imageType} image`,
           image_type: imageType
         });
@@ -85,8 +88,8 @@ export default {
         },
         body: JSON.stringify({
           ref: "main",
-          inputs: { 
-            url, 
+          inputs: {
+            url,
             track,
             image_type: imageType
           }
@@ -103,7 +106,7 @@ export default {
 
       return jsonResponse(200, {
         status: "processing",
-        tracking_url: `https://github.com/RecSpeed/firmwareextrs/actions`,
+        tracking_url: "https://github.com/RecSpeed/firmwareextrs/actions",
         message: `Started processing ${imageType} image`,
         image_type: imageType
       });
