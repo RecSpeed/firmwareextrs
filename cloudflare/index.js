@@ -8,7 +8,7 @@ export default {
       return new Response("Missing 'get' or 'url' parameter.", { status: 400 });
     }
 
-    // CDN yönlendirme
+    // 📦 CDN yönlendirmesi
     const domains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
       "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
@@ -28,30 +28,30 @@ export default {
     const name = url.split("/").pop().replace(".zip", "");
     const kvKey = `${get}:${name}`;
 
-    // 1️⃣ KV kontrolü
-if (trackingUrl) {
-  // Eğer KV'de kayıt varsa, v.json'da bitmiş bir işlem var mı kontrol et
-  try {
-    const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-    if (vjson.ok) {
-      const data = await vjson.json();
-      const found = Object.entries(data).find(([key]) => key.startsWith(name));
-      if (found) {
-        const [, values] = found;
-        if (values[`${get}_zip`] === "false") {
-          return new Response(`❌ Requested image (${get}) not found (v.json).`, { status: 404 });
-        } else if (values[`${get}_zip`] === "true") {
-          const dl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
-          return new Response(`link: ${dl}`, { status: 200 });
+    // 1️⃣ KV kontrolü (aynı görev hâlâ çalışıyor mu?)
+    const trackingUrl = await env.FCE_KV.get(kvKey);
+    if (trackingUrl) {
+      try {
+        const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
+        if (vjson.ok) {
+          const data = await vjson.json();
+          const found = Object.entries(data).find(([key]) => key.startsWith(name));
+          if (found) {
+            const [, values] = found;
+            if (values[`${get}_zip`] === "false") {
+              return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
+            } else if (values[`${get}_zip`] === "true") {
+              const dl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
+              return new Response(`link: ${dl}`, { status: 200 });
+            }
+          }
         }
+      } catch (_) {
+        return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
       }
+
+      return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
     }
-  } catch (_) {}
-
-  // Eğer v.json'da bulamadıysa halen track ediliyordur
-  return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
-}
-
 
     // 2️⃣ Release kontrolü
     const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
@@ -71,7 +71,7 @@ if (trackingUrl) {
       }
     }
 
-    // 2.5️⃣ v.json kontrolü
+    // 2.5️⃣ v.json kontrolü (daha önce çalıştı ama dosya yoksa)
     try {
       const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
       if (vjson.ok) {
@@ -80,17 +80,16 @@ if (trackingUrl) {
         if (found) {
           const [, values] = found;
           if (values[`${get}_zip`] === "false") {
-            return new Response(`❌ Requested image not found.`, { status: 404 });
+            return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
           }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      // ignore
+    }
 
-    // 3️⃣ Dispatch ve Polling
+    // 3️⃣ Görev başlatılıyor
     const track = Date.now().toString();
-    const TRACK_URL = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
-
-    // Dispatch işlemi başlatılıyor ve KV’ye 2 dakika TTL ile ekleniyor
     await env.FCE_KV.put(kvKey, `https://github.com/RecSpeed/firmwareextrs/actions`, {
       expirationTtl: 120
     });
@@ -114,10 +113,11 @@ if (trackingUrl) {
     });
 
     if (dispatchRes.ok) {
-      // Polling ile build sonucu takip ediliyor
+      // Polling yapılacak
       const pollingLimit = 12;
+      const TRACK_URL = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
       for (let i = 0; i < pollingLimit; i++) {
-        await new Promise(r => setTimeout(r, 5000)); // 5s bekle
+        await new Promise(r => setTimeout(r, 5000));
 
         const trackRes = await fetch(TRACK_URL, {
           headers: {
@@ -129,19 +129,15 @@ if (trackingUrl) {
 
         if (trackRes.ok) {
           const data = await trackRes.json();
-          const run = data.workflow_runs.find(w =>
-            w.head_branch === "main" &&
-            w.event === "workflow_dispatch" &&
-            new Date(w.created_at).getTime() >= parseInt(track)
-          );
+          const run = data.workflow_runs.find(w => w.head_branch === "main" && w.name === track);
 
           if (run && run.status === "completed") {
             if (run.conclusion === "success") {
               try {
                 const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
                 if (vjson.ok) {
-                  const json = await vjson.json();
-                  const found = Object.entries(json).find(([key]) => key.startsWith(name));
+                  const data = await vjson.json();
+                  const found = Object.entries(data).find(([key]) => key.startsWith(name));
                   if (found) {
                     const [, values] = found;
                     if (values[`${get}_zip`] === "false") {
@@ -151,7 +147,7 @@ if (trackingUrl) {
                     return new Response(`link: ${dlLink}`, { status: 200 });
                   }
                 }
-              } catch (e) {
+              } catch (_) {
                 return new Response("Build succeeded but v.json couldn't be read.", { status: 500 });
               }
             }
@@ -163,10 +159,7 @@ if (trackingUrl) {
         }
       }
 
-      // 60 saniyede hâlâ tamamlanmadıysa
-      return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, {
-        status: 202
-      });
+      return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, { status: 202 });
     }
 
     const err = await dispatchRes.text();
