@@ -1,8 +1,8 @@
 export default {
   async fetch(req, env) {
-  const urlParams = new URL(req.url).searchParams;
-  let url = urlParams.get("url");
-  let get = urlParams.get("get") || "boot_img";
+    const urlParams = new URL(req.url).searchParams;
+    let url = urlParams.get("url");
+    const get = "boot_img"; // sadece boot_img destekleniyor, sabit kalmalı
 
     if (!url || !url.includes(".zip")) {
       return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
