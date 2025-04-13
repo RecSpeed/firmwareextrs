@@ -12,8 +12,7 @@ export default {
     url = url.split(".zip")[0] + ".zip";
     const fileName = url.split("/").pop();
     const name = fileName.replace(".zip", "");
-    const get = "boot_img";
-
+    
     // CDN override
     const cdnDomains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
