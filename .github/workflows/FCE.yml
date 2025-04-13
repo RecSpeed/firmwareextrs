@@ -45,7 +45,7 @@ jobs:
             echo "payload.bin not found, checking for raw images..."
           fi
 
-      - name: Create ZIP or mark failure in v.json
+      - name: Create ZIP
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
@@ -56,6 +56,7 @@ jobs:
             7z a "./release/recovery_img_${rom_name}.zip" recovery.img
           else
             echo "Requested image not found"
+
             FILE="v.json"
             NEW_ENTRY='"'${rom_name}'": {
   "'${GET}'_zip": "false"
@@ -82,14 +83,12 @@ jobs:
         with:
           tag_name: auto
           name: Auto Firmware Extracts
-          files: |
-            release/*.zip
+          files: release/*.zip
 
-      - name: Update v.json (Success Path)
+      - name: Update v.json
         run: |
           rom_name=$(basename "$URL" .zip)
           FILE="v.json"
-
           link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
 
           NEW_ENTRY='"'${rom_name}'": {
@@ -107,7 +106,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add v.json
-          git commit -m "update ${GET} for ${rom_name}"
+          git commit -m "update $GET for $rom_name"
           git push
 
       - name: End of Process
