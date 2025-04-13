@@ -9,9 +9,8 @@ export default {
     }
 
     const domains = [
-      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
-      "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
-      "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
+      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
+      "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
     ];
     for (const domain of domains) {
       if (url.includes(domain)) {
@@ -26,35 +25,27 @@ export default {
 
     url = url.split(".zip")[0] + ".zip";
     const name = url.split("/").pop().replace(".zip", "");
-    const kvKey = `${get}:${name}`;
+    const key = `${get}:${name}`;
 
-    const currentStatus = await env.FCE_KV.get(kvKey);
-
-    // 🔍 1. DONE: Release varsa döner
-    if (currentStatus === "done") {
-      const dl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
-      const headRes = await fetch(dl, { method: "HEAD" });
-      if (headRes.ok) {
-        return new Response(`link: ${dl}`, { status: 200 });
-      }
+    // 1️⃣ KV üzerinden işlem durumu kontrolü
+    const status = await env.FCE_KV.get(key);
+    if (status === "pending") {
+      return new Response(`⏳ Process already running.\nTrack progress: https://github.com/RecSpeed/firmwareextrs/actions`, { status: 202 });
     }
 
-    // 🔍 2. FAIL: Daha önce başarısızsa doğrudan hata döner
-    if (currentStatus === "fail") {
+    if (status === "done") {
+      const dlLink = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
+      return new Response(`link: ${dlLink}`, { status: 200 });
+    }
+
+    if (status === "fail") {
       return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
     }
 
-    // 🔁 3. PENDING: İşlem hâlâ sürüyorsa
-    if (currentStatus === "pending") {
-      return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, {
-        status: 202
-      });
-    }
+    // 2️⃣ Yeni işlem başlatılıyor → 'pending' olarak KV’ye yaz
+    await env.FCE_KV.put(key, "pending", { expirationTtl: 180 });
 
-    // 🚀 4. Yeni işlem başlat
-    const track = Date.now().toString();
-    await env.FCE_KV.put(kvKey, "pending", { expirationTtl: 180 }); // 3 dakika
-
+    // 3️⃣ GitHub Actions Dispatch tetikleme
     const dispatchRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
       method: "POST",
       headers: {
@@ -65,7 +56,11 @@ export default {
       },
       body: JSON.stringify({
         ref: "main",
-        inputs: { url, get, track }
+        inputs: {
+          url,
+          get,
+          track: key
+        }
       })
     });
 
@@ -76,6 +71,7 @@ export default {
     }
 
     const err = await dispatchRes.text();
+    await env.FCE_KV.delete(key); // hata varsa kilidi kaldır
     return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
   }
 };
