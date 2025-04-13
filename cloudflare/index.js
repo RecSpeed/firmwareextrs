@@ -1,16 +1,17 @@
-// ✅ Final Cloudflare Worker (sadece boot_img destekli, PCE bitene kadar bekler)
 export default {
   async fetch(req, env) {
     const urlParams = new URL(req.url).searchParams;
     let url = urlParams.get("url");
+    const get = "boot_img"; // Sadece boot_img destekleniyor
 
     if (!url || !url.includes(".zip")) {
       return new Response("Missing or invalid 'url' parameter.", { status: 400 });
     }
 
     const domains = [
-      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
-      "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
+      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
+      "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
+      "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
     ];
     for (const domain of domains) {
       if (url.includes(domain)) {
@@ -21,10 +22,9 @@ export default {
 
     url = url.split(".zip")[0] + ".zip";
     const name = url.split("/").pop().replace(".zip", "");
-    const expectedName = `boot_img_${name}.zip`;
-    const releaseUrl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${expectedName}`;
+    const fileName = `boot_img_${name}.zip`;
 
-    // 1. Release kontrolü
+    // 1️⃣ Önce Release kontrolü
     const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
       headers: {
         Authorization: `token ${env.GTKK}`,
@@ -35,27 +35,13 @@ export default {
 
     if (releaseRes.ok) {
       const release = await releaseRes.json();
-      const asset = release.assets.find(a => a.name === expectedName);
+      const asset = release.assets.find(a => a.name === fileName);
       if (asset) {
         return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
       }
     }
 
-    // 2. v.json kontrolü
-    try {
-      const vjsonRes = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-      if (vjsonRes.ok) {
-        const data = await vjsonRes.json();
-        const entry = data[name];
-        if (entry) {
-          if (entry.boot_img_zip === "false") {
-            return new Response("❌ Requested image (boot_img) not found.", { status: 404 });
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 3. GitHub Dispatch
+    // 2️⃣ Yeni görev başlat
     const track = Date.now().toString();
     const dispatchRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
       method: "POST",
@@ -69,7 +55,7 @@ export default {
         ref: "main",
         inputs: {
           url,
-          get: "boot_img",
+          get,
           track
         }
       })
@@ -80,32 +66,46 @@ export default {
       return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
     }
 
-    // 4. Polling (tamamlanana kadar bekleme)
-    const trackUrl = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
-    const headers = {
-      Authorization: `token ${env.GTKK}`,
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "FCE Worker"
-    };
-
-    const maxWait = 30; // 30 x 5s = 150 saniye
-    for (let i = 0; i < maxWait; i++) {
+    // 3️⃣ Polling: FCE tamamlanana kadar bekle
+    const pollingUrl = "https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs";
+    for (let i = 0; i < 24; i++) { // ~2 dakika bekleme
       await new Promise(r => setTimeout(r, 5000));
+      const runsRes = await fetch(pollingUrl, {
+        headers: {
+          Authorization: `token ${env.GTKK}`,
+          Accept: "application/vnd.github.v3+json"
+        }
+      });
 
-      const runsRes = await fetch(trackUrl, { headers });
       if (runsRes.ok) {
-        const data = await runsRes.json();
-        const matchedRun = data.workflow_runs.find(run => run.name === track);
-        if (matchedRun && matchedRun.status === "completed") {
-          if (matchedRun.conclusion === "failure") {
-            return new Response("❌ Requested image (boot_img) failed.", { status: 404 });
+        const runs = await runsRes.json();
+        const run = runs.workflow_runs.find(r => r.name === track);
+        if (run && run.status === "completed") {
+          if (run.conclusion === "success") {
+            // Yeniden Release kontrolü
+            const reReleaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+              headers: {
+                Authorization: `token ${env.GTKK}`,
+                Accept: "application/vnd.github.v3+json"
+              }
+            });
+
+            if (reReleaseRes.ok) {
+              const rel = await reReleaseRes.json();
+              const asset = rel.assets.find(a => a.name === fileName);
+              if (asset) {
+                return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
+              }
+            }
+
+            return new Response("Build completed but file not found in release.", { status: 404 });
           } else {
-            return new Response(`link: ${releaseUrl}`, { status: 200 });
+            return new Response("❌ Requested image not found or build failed.", { status: 404 });
           }
         }
       }
     }
 
-    return new Response("Timeout. Firmware process did not finish in time.", { status: 408 });
+    return new Response("⏳ Timeout: Process did not complete in time.", { status: 504 });
   }
-};
+}
