@@ -1,7 +1,7 @@
 {
-  "miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0": {
+  "miui_TUCANARUGlobal_V53.0.3.0.5FDRUXM_9813613bb5_12.0": {
     "boot_img_zip": "true",
-    "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0.zip",
+    "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_5UCANARUGlobal_513.0.3.0.RFDRUXM_9813613bb0_11.0.zip",
     "recovery_img_zip": "false"
   }
 }
