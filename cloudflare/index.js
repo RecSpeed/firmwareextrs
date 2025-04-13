@@ -1,85 +1,111 @@
 export default {
   async fetch(req, env) {
-    const urlParams = new URL(req.url, "https://dummy.url").searchParams;
-    let url = urlParams.get("url");
-    const get = "boot_img";
+    try {
+      const urlParams = new URL(req.url, "https://dummy.url").searchParams;
+      let url = urlParams.get("url");
+      const get = urlParams.get("get") || "boot_img";
 
-    if (!url || !url.includes(".zip")) {
-      return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
-    }
-
-    url = url.split(".zip")[0] + ".zip";
-    const name = url.split("/").pop().replace(".zip", "");
-
-    // Check CDN domains and replace if needed
-    const cdnDomains = [
-      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
-      "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
-      "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
-    ];
-    for (const domain of cdnDomains) {
-      if (url.includes(domain)) {
-        url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
-        break;
+      if (!url || !url.includes(".zip")) {
+        return jsonResponse(400, {
+          status: "error",
+          message: "Missing or invalid 'url' parameter (.zip required)"
+        });
       }
-    }
 
-    // First check if the file already exists in releases
-    const releaseRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto`, {
-      headers: {
-        Authorization: `Bearer ${env.GTKK}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "FCE Worker"
+      url = url.split(".zip")[0] + ".zip";
+      const name = url.split("/").pop().replace(".zip", "");
+
+      // CDN domain replacement logic...
+      const cdnDomains = [
+        "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
+        "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
+        "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
+      ];
+      
+      for (const domain of cdnDomains) {
+        if (url.includes(domain)) {
+          url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
+          break;
+        }
       }
-    });
 
-    if (releaseRes.ok) {
-      const release = await releaseRes.json();
-      const asset = release.assets.find(a => a.name === `${get}_${name}.zip`);
-      if (asset) return Response.redirect(asset.browser_download_url, 302);
+      // Check for existing release
+      const releaseRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto`, {
+        headers: {
+          Authorization: `Bearer ${env.GTKK}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "FCE Worker"
+        }
+      });
+
+      if (releaseRes.ok) {
+        const release = await releaseRes.json();
+        const asset = release.assets.find(a => a.name === `${get}_${name}.zip`);
+        if (asset) {
+          return jsonResponse(200, {
+            status: "ready",
+            download_url: asset.browser_download_url,
+            filename: `${get}_${name}.zip`
+          });
+        }
+      }
+
+      const kvKey = `${get}:${name}`;
+      const existingTrack = await env.FCE_KV.get(kvKey);
+
+      if (existingTrack) {
+        return jsonResponse(200, {
+          status: "processing",
+          tracking_url: `https://github.com/RecSpeed/firmwareextrs/actions`,
+          message: "This firmware is already being processed"
+        });
+      }
+
+      // Start new process
+      const track = Date.now().toString();
+      await env.FCE_KV.put(kvKey, track, { expirationTtl: 1800 });
+
+      const dispatch = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.GTKK}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+          "User-Agent": "FCE Worker"
+        },
+        body: JSON.stringify({
+          ref: "main",
+          inputs: { url, track }
+        })
+      });
+
+      if (!dispatch.ok) {
+        const err = await dispatch.text();
+        return jsonResponse(500, {
+          status: "error",
+          message: `GitHub Dispatch Error: ${err}`
+        });
+      }
+
+      return jsonResponse(200, {
+        status: "processing",
+        tracking_url: `https://github.com/RecSpeed/firmwareextrs/actions`,
+        message: "Processing started for firmware"
+      });
+
+    } catch (error) {
+      return jsonResponse(500, {
+        status: "error",
+        message: `Internal server error: ${error.message}`
+      });
     }
-
-    const kvKey = `${get}:${name}`;
-    const existingTrack = await env.FCE_KV.get(kvKey);
-
-    // If there's an existing process, return tracking info
-    if (existingTrack) {
-      const trackingUrl = `https://github.com/RecSpeed/firmwareextrs/actions?query=workflow%3AFCE+is%3Arunning`;
-      return new Response(
-        `⏳ This firmware is already being processed. Track progress: ${trackingUrl}\n\n` +
-        `When complete, your download will be available at: https://github.com/RecSpeed/firmwareextrs/releases/tag/auto`,
-        { status: 200 }
-      );
-    }
-
-    // Start new process
-    const track = Date.now().toString();
-    await env.FCE_KV.put(kvKey, track, { expirationTtl: 1800 }); // 30 minutes expiration
-
-    const dispatch = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.GTKK}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-        "User-Agent": "FCE Worker"
-      },
-      body: JSON.stringify({
-        ref: "main",
-        inputs: { url, track }
-      })
-    });
-
-    if (!dispatch.ok) {
-      const err = await dispatch.text();
-      return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
-    }
-
-    const trackingUrl = `https://github.com/RecSpeed/firmwareextrs/actions?query=workflow%3AFCE+is%3Arunning`;
-    return new Response(
-      `🚀 Processing started for ${name}. Track progress: ${trackingUrl}\n\n` +
-      `When complete, your download will be available at: https://github.com/RecSpeed/firmwareextrs/releases/tag/auto`,
-      { status: 200 }
-    );
   }
 };
+
+// Helper function for JSON responses
+function jsonResponse(status, data) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
