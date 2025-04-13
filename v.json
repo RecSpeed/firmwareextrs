@@ -1,16 +1,4 @@
-{
-  "miui_TUCANARUGlobal_V53.0.3.0.5FDRUXM_9813613bb5_12.0": {
-    "boot_img_zip": "true",
-    "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_5UCANARUGlobal_513.0.3.0.RFDRUXM_9813613bb0_11.0.zip",
-    "recovery_img_zip": "false"
-  },
-  "miui_2MNote6ProGlobal_V15.0.1.0.AEKMIXM_2920d51d84_9.0": {
-    "recovery_img_zip": "false"
-  },
-  "miui_TUCANARUGlobal_V11.1.2.0.QFDRUXM_c853e418ee_10.0": {
-    "recovery_img_zip": "false"
-  },
-  "miui_TUCANA_V12.1.3.0.RFDCNXM_2a2aeb8727_11.0": {
-    "recovery_img_zip": "false"
-  }
+,
+"miui_TUCANA_V12.1.3.0.RFDCNXM_2a2aeb8727_11.0": {
+  "recovery_img_zip": "false"
 }
