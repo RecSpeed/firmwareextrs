@@ -48,11 +48,7 @@ export default {
       // sessizce geç
     }
 
-    // 🔁 1. KV kontrolü (aynı görev halen çalışıyor mu?)
-    const trackingUrl = await env.FCE_KV.get(kvKey);
-    if (trackingUrl) {
-      return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
-    }
+
 
     // 2️⃣ Release'de varsa link ver
     const rel = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
@@ -88,6 +84,13 @@ export default {
       // ignore v.json error
     }
 
+        // 🔁 1. KV kontrolü (aynı görev halen çalışıyor mu?)
+    const trackingUrl = await env.FCE_KV.get(kvKey);
+    if (trackingUrl) {
+      return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
+    }
+
+    
     // 4️⃣ İşlem başlatılmamış, şimdi başlat → track bilgisi verip çık
     const trackId = Date.now().toString();
     const runUrl = `https://github.com/RecSpeed/firmwareextrs/actions`; // gösterilecek sayfa
