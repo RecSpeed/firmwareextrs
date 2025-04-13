@@ -45,35 +45,18 @@ jobs:
             echo "payload.bin not found, checking for raw images..."
           fi
 
-      - name: Create ZIP or Record Failure
+      - name: Create ZIP
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
-
-          NOT_FOUND_JSON='"'$rom_name'": {
-            "'$GET'_zip": "false",
-            "'$GET'_link": "",
-            "processing": "done"
-          }'
 
           if [ "$GET" = "boot_img" ] && [ -f "boot.img" ]; then
             7z a "./release/boot_img_${rom_name}.zip" boot.img
           elif [ "$GET" = "recovery_img" ] && [ -f "recovery.img" ]; then
             7z a "./release/recovery_img_${rom_name}.zip" recovery.img
           else
-            echo "Requested image not found, updating v.json..."
-            if [ ! -f "v.json" ]; then
-              echo -e "{\n$NOT_FOUND_JSON\n}" > v.json
-            else
-              sed -i '$d' v.json
-              echo -e ",\n$NOT_FOUND_JSON\n}" >> v.json
-            fi
-
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git add v.json
-            git commit -m "Mark $rom_name $GET as not found"
-            git push
+            echo "Requested image not found"
+            echo "::error title=Image Not Found::The requested image ($GET) does not exist."
             exit 1
           fi
 
@@ -84,3 +67,33 @@ jobs:
           name: Auto Firmware Extracts
           files: |
             release/*.zip
+
+      - name: Update v.json
+        run: |
+          rom_name=$(basename "$URL" .zip)
+          FILE="v.json"
+
+          link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
+
+          NEW_ENTRY='"'${rom_name}'": {
+            "'${GET}'_zip": "true",
+            "'${GET}'_link": "'${link}'"
+          }'
+
+          if [ ! -f "$FILE" ]; then
+            echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
+          else
+            sed -i '$d' "$FILE"
+            echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add v.json
+          git commit -m "update $GET for $rom_name"
+          git push
+
+      - name: End of Process
+        run: |
+          echo "✔️ Process completed for $GET → $URL"
+        continue-on-error: true
