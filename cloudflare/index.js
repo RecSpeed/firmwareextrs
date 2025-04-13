@@ -51,7 +51,11 @@ export default {
           ...headers,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ ref: "main", inputs: { url, get, track } })
+        body: JSON.stringify({
+  ref: "main",
+  inputs: { url, track } // <--- get gönderme
+        })
+
       });
 
       if (!dispatchRes.ok) {
