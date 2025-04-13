@@ -1,18 +1,18 @@
-// index.js (Cloudflare Worker)
 export default {
   async fetch(req, env) {
     const urlParams = new URL(req.url, "https://dummy.url").searchParams;
-    let url = urlParams.get("url");
-    let get = urlParams.get("get") || "boot_img";
+    const url = urlParams.get("url");
+    const get = "boot_img";
 
     if (!url || !url.includes(".zip")) {
-      return new Response("\u274C Missing or invalid 'url' parameter (.zip required).", { status: 400 });
+      return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
     }
 
-    url = url.split(".zip")[0] + ".zip";
-    const fileName = url.split("/").pop();
-    const name = fileName.replace(".zip", "");
+    const fileName = url.split("/").pop().split(".zip")[0];
+    const normalizedName = fileName;
+    const kvKey = `${get}:${normalizedName}`;
 
+    // CDN düzeltmesi
     const cdnDomains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
       "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
@@ -25,6 +25,13 @@ export default {
       }
     }
 
+    // 1. Daha önce başarısız olarak işaretlendiyse direkt döndür
+    const existingStatus = await env.FCE_KV.get(kvKey);
+    if (existingStatus === "fail") {
+      return new Response("❌ This firmware failed previously.", { status: 404 });
+    }
+
+    // 2. Release'de dosya zaten varsa direkt ver
     const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
       headers: {
         Authorization: `Bearer ${env.GTKK}`,
@@ -35,50 +42,39 @@ export default {
 
     if (releaseRes.ok) {
       const release = await releaseRes.json();
-      const asset = release.assets.find(a => a.name === `${get}_${name}.zip`);
+      const asset = release.assets.find(a => a.name === `${get}_${normalizedName}.zip`);
       if (asset) {
+        await env.FCE_KV.put(kvKey, "done", { expirationTtl: 604800 });
         return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
       }
     }
 
-    const kvKey = `${get}:${name}`;
-    const existingTrack = await env.FCE_KV.get(kvKey);
-    if (existingTrack) {
-      const runStatusRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`, {
+    // 3. Daha önce başlatıldıysa kontrol et
+    if (existingStatus && existingStatus !== "fail" && existingStatus !== "done") {
+      const runs = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs", {
         headers: {
           Authorization: `Bearer ${env.GTKK}`,
           Accept: "application/vnd.github+json",
           "User-Agent": "FCE Worker"
         }
       });
-
-      if (runStatusRes.ok) {
-        const data = await runStatusRes.json();
-        const found = data.workflow_runs.find(w => w.name === existingTrack && w.head_branch === "main");
-        if (found && found.status === "completed") {
-          if (found.conclusion === "success") {
-            const rel = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
-              headers: {
-                Authorization: `Bearer ${env.GTKK}`,
-                Accept: "application/vnd.github+json",
-                "User-Agent": "FCE Worker"
-              }
-            });
-            if (rel.ok) {
-              const json = await rel.json();
-              const ready = json.assets.find(a => a.name === `${get}_${name}.zip`);
-              if (ready) {
-                return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
-              }
-            }
-            return new Response("\u2705 Build done, release not yet ready.", { status: 202 });
+      if (runs.ok) {
+        const runData = await runs.json();
+        const match = runData.workflow_runs.find(r => r.name === existingStatus && r.head_branch === "main");
+        if (match?.status === "completed") {
+          if (match.conclusion === "failure") {
+            await env.FCE_KV.put(kvKey, "fail", { expirationTtl: 86400 });
+            return new Response("❌ Build failed previously.", { status: 404 });
           } else {
-            return new Response("\u274C Build failed or file not found.", { status: 404 });
+            // başarılıysa ama release geç düştüyse polling yap
           }
+        } else {
+          return new Response("⏳ Process already running. Please wait.", { status: 202 });
         }
       }
     }
 
+    // 4. Yeni job başlat
     const track = Date.now().toString();
     await env.FCE_KV.put(kvKey, track, { expirationTtl: 180 });
 
@@ -97,13 +93,16 @@ export default {
     });
 
     if (!dispatchRes.ok) {
-      const errText = await dispatchRes.text();
-      return new Response(`GitHub Dispatch Error: ${errText}`, { status: 500 });
+      await env.FCE_KV.put(kvKey, "fail", { expirationTtl: 86400 });
+      const text = await dispatchRes.text();
+      return new Response(`GitHub Dispatch Error: ${text}`, { status: 500 });
     }
 
+    // 5. Polling başlat
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 5000));
-      const pollRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+
+      const poll = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
         headers: {
           Authorization: `Bearer ${env.GTKK}`,
           Accept: "application/vnd.github+json",
@@ -111,15 +110,16 @@ export default {
         }
       });
 
-      if (pollRes.ok) {
-        const rel = await pollRes.json();
-        const ready = rel.assets.find(a => a.name === `${get}_${name}.zip`);
-        if (ready) {
-          return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
+      if (poll.ok) {
+        const json = await poll.json();
+        const asset = json.assets.find(a => a.name === `${get}_${normalizedName}.zip`);
+        if (asset) {
+          await env.FCE_KV.put(kvKey, "done", { expirationTtl: 604800 });
+          return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
         }
       }
     }
 
-    return new Response("\u23F3 Timeout: Process did not complete in time.", { status: 202 });
+    return new Response("⏳ Timeout: Process did not complete in time.", { status: 202 });
   }
 };
