@@ -31,4 +31,9 @@
         "app_settings_zip": "false",
         "processing": "false"
     }
+,
+"miui_TUCANA_V12.5.4.0.RFDCNXM_7c05d34c85_11.0": {
+  "boot_img_zip": "true",
+  "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_TUCANA_V12.5.4.0.RFDCNXM_7c05d34c85_11.0.zip"
+}
 }
