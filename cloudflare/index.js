@@ -1,19 +1,18 @@
+// index.js (Cloudflare Worker)
 export default {
   async fetch(req, env) {
     const urlParams = new URL(req.url).searchParams;
     let url = urlParams.get("url");
-    const get = "boot_img"; // sadece boot_img destekleniyor, sabit kalmalı
+    let get = urlParams.get("get") || "boot_img";
 
     if (!url || !url.includes(".zip")) {
-      return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
+      return new Response("\u274C Missing or invalid 'url' parameter (.zip required).", { status: 400 });
     }
 
-    // Normalize URL
     url = url.split(".zip")[0] + ".zip";
     const fileName = url.split("/").pop();
     const name = fileName.replace(".zip", "");
-    
-    // CDN override
+
     const cdnDomains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
       "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
@@ -36,7 +35,7 @@ export default {
 
     if (releaseRes.ok) {
       const release = await releaseRes.json();
-      const asset = release.assets.find(a => a.name === `boot_img_${name}.zip`);
+      const asset = release.assets.find(a => a.name === `${get}_${name}.zip`);
       if (asset) {
         return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
       }
@@ -67,20 +66,19 @@ export default {
             });
             if (rel.ok) {
               const json = await rel.json();
-              const ready = json.assets.find(a => a.name === `boot_img_${name}.zip`);
+              const ready = json.assets.find(a => a.name === `${get}_${name}.zip`);
               if (ready) {
                 return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
               }
             }
-            return new Response("✅ Build done, release not yet ready.", { status: 202 });
+            return new Response("\u2705 Build done, release not yet ready.", { status: 202 });
           } else {
-            return new Response("❌ Build failed or file not found.", { status: 404 });
+            return new Response("\u274C Build failed or file not found.", { status: 404 });
           }
         }
       }
     }
 
-    // Yeni job tetikle
     const track = Date.now().toString();
     await env.FCE_KV.put(kvKey, track, { expirationTtl: 180 });
 
@@ -103,7 +101,6 @@ export default {
       return new Response(`GitHub Dispatch Error: ${errText}`, { status: 500 });
     }
 
-    // Build başlatıldı, bekleniyor
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 5000));
       const pollRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
@@ -116,13 +113,13 @@ export default {
 
       if (pollRes.ok) {
         const rel = await pollRes.json();
-        const ready = rel.assets.find(a => a.name === `boot_img_${name}.zip`);
+        const ready = rel.assets.find(a => a.name === `${get}_${name}.zip`);
         if (ready) {
           return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
         }
       }
     }
 
-    return new Response("⏳ Timeout: Process did not complete in time.", { status: 202 });
+    return new Response("\u23F3 Timeout: Process did not complete in time.", { status: 202 });
   }
 };
