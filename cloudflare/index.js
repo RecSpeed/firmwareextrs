@@ -8,7 +8,7 @@ export default {
       return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
     }
 
-    const normalizedUrl = url.split(".zip")[0] + ".zip";
+    let normalizedUrl = url.split(".zip")[0] + ".zip";
     const name = normalizedUrl.split("/").pop().replace(".zip", "");
 
     const cdnDomains = [
