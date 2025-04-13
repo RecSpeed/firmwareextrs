@@ -13,14 +13,14 @@ export default {
     }
 
     const domains = [
-      "ultimateota.d.miui.com", 
-      "superota.d.miui.com", 
-      "bigota.d.miui.com", 
-      "cdnorg.d.miui.com", 
-      "bn.d.miui.com", 
-      "hugeota.d.miui.com",
-      "cdn-ota.azureedge.net",
-      "airtel.bigota.d.miui.com"
+        "ultimateota.d.miui.com", 
+        "superota.d.miui.com", 
+        "bigota.d.miui.com", 
+        "cdnorg.d.miui.com", 
+        "bn.d.miui.com", 
+        "hugeota.d.miui.com",
+        "cdn-ota.azureedge.net",
+        "airtel.bigota.d.miui.com"
     ];
 
     if (url) {
@@ -34,11 +34,13 @@ export default {
       return new Response("\nMissing 'url' parameter!\n", { status: 400 });
     }
 
+ 
     if (url && url.includes(".zip")) {
       url = url.split(".zip")[0] + ".zip";
     } else {
       return new Response("\nOnly .zip URLs are supported.\n", { status: 400 });
     }
+
 
     const response = await fetch(url, { method: 'HEAD' });
     if (!response.ok) {
@@ -46,27 +48,25 @@ export default {
     }
 
     const fileName = url.split('/').pop();
-    const combinedBasename = `${get}_${fileName}`;
-    const finalUrl = `https://github.com/offici5l/Firmware-Content-Extractor/releases/download/${get}/${combinedBasename}`;
+    const combinedBasename = ${get}_${fileName};
+    const finalUrl = https://github.com/offici5l/Firmware-Content-Extractor/releases/download/${get}/${combinedBasename};
 
     const headers = {
-      'Authorization': `token ${env.GTKK}`, // API token'ı burada kullanıyoruz
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json',
-      'User-Agent': 'Cloudflare Worker',
-      'Access-Control-Allow-Origin': '*', // CORS izinleri
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      "Authorization": token ${env.GTKK},
+      "Accept": "application/vnd.github.v3+json",
+      "Content-Type": "application/json",
+      "User-Agent": "Cloudflare Worker"
     };
 
     const BaseUrl = "https://api.github.com/repos/offici5l/Firmware-Content-Extractor/actions/workflows/FCE.yml";
-    const githubDispatchUrl = `${BaseUrl}/dispatches`;
-    const TRACK_URL = `${BaseUrl}/runs`;
+
+    const githubDispatchUrl = ${BaseUrl}/dispatches;
+    const TRACK_URL = ${BaseUrl}/runs;
 
     try {
       const finalUrlResponse = await fetch(finalUrl, { method: 'HEAD' });
       if (finalUrlResponse.ok) {
-        return new Response(`\nresult: available\nlink: ${finalUrl}\n`, { status: 200 });
+        return new Response(\nresult: available\nlink: ${finalUrl}\n, { status: 200 });
       }
 
       const track = Date.now().toString();
@@ -89,7 +89,7 @@ export default {
                 const jobData = await jobResponse.json();
                 const job = jobData.jobs.find(job => job.name === track);
                 if (job) {
-                  return new Response(`\n\nIt will be available at this link: ${finalUrl}\n\nTrack progress: ${job.html_url}\n\n`, { status: 200 });
+                  return new Response(\n\nIt will be available at this link: ${finalUrl}\n\nTrack progress: ${job.html_url}\n\n, { status: 200 });
                 }
               }
             }
@@ -97,10 +97,10 @@ export default {
         }
       } else {
         const githubResponseText = await githubResponse.text();
-        return new Response(`GitHub Response Error: ${githubResponseText}`, { status: 500 });
+        return new Response(GitHub Response Error: ${githubResponseText}, { status: 500 });
       }
     } catch (error) {
-      return new Response(`Error: ${error.message}`, { status: 500 });
+      return new Response(Error: ${error.message}, { status: 500 });
     }
   }
 };
