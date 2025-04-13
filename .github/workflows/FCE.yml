@@ -6,7 +6,7 @@ on:
       url:
         required: true
       get:
-        required: true
+        required: false
       track:
         required: false
 
@@ -21,7 +21,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
@@ -40,16 +41,19 @@ jobs:
         run: |
           if [ -f "payload.bin" ]; then
             ./tools/payload_dumper.py --out . --images boot payload.bin
+          else
+            echo "payload.bin bulunamadı."
+            exit 1
           fi
 
-      - name: Create ZIP
+      - name: Create ZIP for boot.img
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
           if [ -f "boot.img" ]; then
             7z a "./release/boot_img_${rom_name}.zip" boot.img
           else
-            echo "Requested image not found"
+            echo "boot.img not found"
             exit 1
           fi
 
