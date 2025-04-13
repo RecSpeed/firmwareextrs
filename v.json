@@ -1,5 +1,5 @@
 {
-  "miui_TUCANARUGlobal_V13.0.9.0.RFDRUXM_9813613bb0_11.0": {
+  "miui_TUCANARUGlobal_V13.0.9.0.RFDasdRUXM_9813613bb0_11.0": {
     "boot_img_zip": "true",
     "recovery_img_zip": "false",
     "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0.zip"
@@ -9,21 +9,21 @@
     "recovery_img_zip": "false"
   }
 ,
-"miui_HMNote6ProGlobal_V12.0.9.0.PEKMIXM_1920d51d84_9.0": {
+"miui_HMNote6ProGlobal_V12.0.9.0.PEKMIXsadM_1920dasdasd51d84_9.0": {
   "boot_img_zip": "true",
   "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_HMNote6ProGlobal_V12.0.1.0.PEKMIXM_1920d51d84_9.0.zip"
 }
 ,
-"miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0": {
+"miui_TUCANARUGlobal_V13.0.3.0.RFDR3eUXM_9813613bb0_11.0": {
   "boot_img_zip": "true",
-  "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0.zip"
+  "boot_img_link": "https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_miui_TUCANARUGlobal_V13.0.3.0.RFDRasdasdUXM_9813613bb0_11.0.zip"
 }
 ,
-"miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0": {
+"miui_TUCANARUGlobal_V13.0.3.0.RFDRasdUXM_9813613bb0_11.0": {
     "recovery_img_zip": "false"
   }
 ,
-"miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613bb0_11.0": {
+"miui_TUCANARUGlobal_V13.0.3.0.RFDRUXM_9813613asdasdbb0_11.0": {
     "recovery_img_zip": "false"
   }
 }
