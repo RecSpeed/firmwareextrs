@@ -1,112 +1,111 @@
-const domains = [
-  "ultimateota.d.miui.com",
-  "superota.d.miui.com",
-  "bigota.d.miui.com",
-  "cdnorg.d.miui.com",
-  "bn.d.miui.com",
-  "hugeota.d.miui.com",
-  "cdn-ota.azureedge.net",
-  "airtel.bigota.d.miui.com",
-];
+// ✅ Final Cloudflare Worker (sadece boot_img destekli, PCE bitene kadar bekler)
+export default {
+  async fetch(req, env) {
+    const urlParams = new URL(req.url).searchParams;
+    let url = urlParams.get("url");
 
-if (url) {
-  if (url.includes(".zip")) {
-    url = url.split(".zip")[0] + ".zip";
-  } else {
-    return new Response("\nOnly .zip URLs are supported.\n", { status: 400 });
-  }
-  for (const domain of domains) {
-    if (url.includes(domain)) {
-      url = url.replace(
-        domain,
-        "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com"
-      );
-      break;
+    if (!url || !url.includes(".zip")) {
+      return new Response("Missing or invalid 'url' parameter.", { status: 400 });
     }
-  }
-} else {
-  return new Response(
-    "\nMissing parameters!\n\nUsage:\ncurl fce.gmrec72.workers.dev?url=<url>\n\nExample:\ncurl fce.gmrec72.workers.dev?url=https://example.com/rom.zip\n\n",
-    { status: 400 }
-  );
-}
 
-const fileName = url.split("/").pop();
-const Name = fileName.split(".zip")[0];
-
-try {
-  const vJsonResponse = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-  if (vJsonResponse.ok) {
-    const data = await vJsonResponse.json();
-    for (const key in data) {
-      if (key.startsWith(Name)) {
-        const values = data[key];
-
-        if (values.boot_img_zip === "true" && values.boot_img_link) {
-          return new Response(`link: ${values.boot_img_link}`, { status: 200 });
-        }
-
-        if (values.processing === "true") {
-          return new Response("Track progress: already running for this firmware", { status: 202 });
-        }
-
-        return new Response("No link yet. Tracking not finished.", { status: 202 });
+    const domains = [
+      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
+      "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
+    ];
+    for (const domain of domains) {
+      if (url.includes(domain)) {
+        url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
+        break;
       }
     }
-  }
-} catch (error) {
-  return new Response(`Error while checking v.json: ${error}`, { status: 500 });
-}
 
-// Eğer daha önce işlenmemişse → GitHub Actions tetiklenir
-const headers = {
-  Authorization: `token ${env.GTKK}`,
-  Accept: "application/vnd.github.v3+json",
-  "Content-Type": "application/json",
-  "User-Agent": "Cloudflare Worker",
-};
+    url = url.split(".zip")[0] + ".zip";
+    const name = url.split("/").pop().replace(".zip", "");
+    const expectedName = `boot_img_${name}.zip`;
+    const releaseUrl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${expectedName}`;
 
-const BaseUrl = "https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml";
-const githubDispatchUrl = `${BaseUrl}/dispatches`;
-const TRACK_URL = `${BaseUrl}/runs`;
+    // 1. Release kontrolü
+    const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+      headers: {
+        Authorization: `token ${env.GTKK}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "FCE Worker"
+      }
+    });
 
-const track = Date.now().toString();
-const data = { ref: "main", inputs: { url, track } };
+    if (releaseRes.ok) {
+      const release = await releaseRes.json();
+      const asset = release.assets.find(a => a.name === expectedName);
+      if (asset) {
+        return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
+      }
+    }
 
-try {
-  const githubResponse = await fetch(githubDispatchUrl, {
-    method: "POST",
-    headers: headers,
-    body: JSON.stringify(data),
-  });
+    // 2. v.json kontrolü
+    try {
+      const vjsonRes = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
+      if (vjsonRes.ok) {
+        const data = await vjsonRes.json();
+        const entry = data[name];
+        if (entry) {
+          if (entry.boot_img_zip === "false") {
+            return new Response("❌ Requested image (boot_img) not found.", { status: 404 });
+          }
+        }
+      }
+    } catch (_) {}
 
-  if (githubResponse.ok) {
-    while (true) {
-      const trackResponse = await fetch(TRACK_URL, { method: "GET", headers });
-      if (trackResponse.ok) {
-        const workflowRuns = await trackResponse.json();
-        for (const jobUrl of workflowRuns.workflow_runs.map(
-          (run) => run.url + "/jobs"
-        )) {
-          const jobResponse = await fetch(jobUrl, { method: "GET", headers });
-          if (jobResponse.ok) {
-            const jobData = await jobResponse.json();
-            const job = jobData.jobs.find((job) => job.name === track);
-            if (job) {
-              return new Response(`\n\nTrack progress: ${job.html_url}\n`, {
-                status: 200,
-              });
-            }
+    // 3. GitHub Dispatch
+    const track = Date.now().toString();
+    const dispatchRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${env.GTKK}`,
+        Accept: "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+        "User-Agent": "FCE Worker"
+      },
+      body: JSON.stringify({
+        ref: "main",
+        inputs: {
+          url,
+          get: "boot_img",
+          track
+        }
+      })
+    });
+
+    if (!dispatchRes.ok) {
+      const err = await dispatchRes.text();
+      return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
+    }
+
+    // 4. Polling (tamamlanana kadar bekleme)
+    const trackUrl = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
+    const headers = {
+      Authorization: `token ${env.GTKK}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "FCE Worker"
+    };
+
+    const maxWait = 30; // 30 x 5s = 150 saniye
+    for (let i = 0; i < maxWait; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+
+      const runsRes = await fetch(trackUrl, { headers });
+      if (runsRes.ok) {
+        const data = await runsRes.json();
+        const matchedRun = data.workflow_runs.find(run => run.name === track);
+        if (matchedRun && matchedRun.status === "completed") {
+          if (matchedRun.conclusion === "failure") {
+            return new Response("❌ Requested image (boot_img) failed.", { status: 404 });
+          } else {
+            return new Response(`link: ${releaseUrl}`, { status: 200 });
           }
         }
       }
     }
-  } else {
-    const githubResponseText = await githubResponse.text();
-    return new Response(`GitHub Response Error: ${githubResponseText}`, {
-      status: 500,
-    });
+
+    return new Response("Timeout. Firmware process did not finish in time.", { status: 408 });
   }
-} catch (error) {
-  return new Response(`Error: ${error.message}`, { status: 500 });
-}
+};
