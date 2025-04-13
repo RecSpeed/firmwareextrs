@@ -26,7 +26,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip p7zip-full aria2
+          sudo apt-get install -y python3-pip p7zip-full aria2 jq
           git clone https://github.com/vm03/payload_dumper.git tools
           pip install -r ./tools/requirements.txt
 
@@ -56,25 +56,6 @@ jobs:
             7z a "./release/recovery_img_${rom_name}.zip" recovery.img
           else
             echo "Requested image not found"
-
-            FILE="v.json"
-            NEW_ENTRY='"'${rom_name}'": {
-          "'${GET}'_zip": "false"
-          }'
-
-            if [ ! -f "$FILE" ]; then
-              echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
-            else
-              sed -i '$d' "$FILE"
-              echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
-            fi
-
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git add v.json
-            git commit -m "mark failure for $rom_name"
-            git push
-
             exit 1
           fi
 
@@ -85,28 +66,45 @@ jobs:
           name: Auto Firmware Extracts
           files: release/*.zip
 
-      - name: Update v.json
+      - name: Update v.json (success)
+        if: success()
         run: |
           rom_name=$(basename "$URL" .zip)
           FILE="v.json"
-          link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
+          key="${GET}_zip"
+          val="true"
+          link_key="${GET}_link"
+          link_val="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
 
-          NEW_ENTRY='"'${rom_name}'": {
-          "'${GET}'_zip": "true",
-          "'${GET}'_link": "'${link}'"
-          }'
+          if [ ! -f "$FILE" ]; then echo "{}" > "$FILE"; fi
 
-          if [ ! -f "$FILE" ]; then
-            echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
-          else
-            sed -i '$d' "$FILE"
-            echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
-          fi
+          jq --arg rn "$rom_name" --arg key "$key" --arg val "$val" \
+             --arg lkey "$link_key" --arg lval "$link_val" \
+             '.[$rn][$key]=$val | .[$rn][$lkey]=$lval' "$FILE" > tmp && mv tmp "$FILE"
 
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add v.json
           git commit -m "update $GET for $rom_name"
+          git push
+
+      - name: Update v.json (failure)
+        if: failure()
+        run: |
+          rom_name=$(basename "$URL" .zip)
+          FILE="v.json"
+          key="${GET}_zip"
+          val="false"
+
+          if [ ! -f "$FILE" ]; then echo "{}" > "$FILE"; fi
+
+          jq --arg rn "$rom_name" --arg key "$key" --arg val "$val" \
+             '.[$rn][$key]=$val' "$FILE" > tmp && mv tmp "$FILE"
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add v.json
+          git commit -m "mark failure for $GET $rom_name"
           git push
 
       - name: End of Process
