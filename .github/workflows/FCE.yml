@@ -59,8 +59,8 @@ jobs:
 
             FILE="v.json"
             NEW_ENTRY='"'${rom_name}'": {
-  "'${GET}'_zip": "false"
-}'
+          "'${GET}'_zip": "false"
+          }'
 
             if [ ! -f "$FILE" ]; then
               echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
@@ -92,9 +92,9 @@ jobs:
           link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
 
           NEW_ENTRY='"'${rom_name}'": {
-  "'${GET}'_zip": "true",
-  "'${GET}'_link": "'${link}'"
-}'
+          "'${GET}'_zip": "true",
+          "'${GET}'_link": "'${link}'"
+          }'
 
           if [ ! -f "$FILE" ]; then
             echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
