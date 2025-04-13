@@ -1,111 +1,87 @@
 export default {
   async fetch(req, env) {
-    const urlParams = new URLSearchParams(req.url.split("?")[1]);
+    const urlParams = new URL(req.url).searchParams;
+    const get = urlParams.get("get");
     let url = urlParams.get("url");
-    let get = urlParams.get("get");
 
-    // 🧪 Log parametreler
-    console.log("Incoming Request → URL:", url);
-    console.log("Incoming Request → GET:", get);
+    if (!url || !get) {
+      return new Response("Missing 'get' or 'url' parameter.", { status: 400 });
+    }
 
+    // 🔁 Domain override işlemi (miui CDN'leri tek CDN'e yönlendiriliyor)
     const domains = [
-      "ultimateota.d.miui.com",
-      "superota.d.miui.com",
-      "bigota.d.miui.com",
-      "cdnorg.d.miui.com",
-      "bn.d.miui.com",
-      "hugeota.d.miui.com",
-      "cdn-ota.azureedge.net",
-      "airtel.bigota.d.miui.com",
+      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
+      "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
     ];
-
-    if (url) {
-      if (url.includes(".zip")) {
-        url = url.split(".zip")[0] + ".zip";
-      } else {
-        return new Response("\nOnly .zip URLs are supported.\n", { status: 400 });
+    for (const domain of domains) {
+      if (url.includes(domain)) {
+        url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
+        break;
       }
+    }
 
-      for (const domain of domains) {
-        if (url.includes(domain)) {
-          url = url.replace(
-            domain,
-            "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com"
-          );
-          break;
-        }
+    // 🌐 URL formatını normalize et
+    if (!url.includes(".zip")) {
+      return new Response("Only .zip URLs are supported.", { status: 400 });
+    }
+    url = url.split(".zip")[0] + ".zip";
+    const name = url.split("/").pop().replace(".zip", "");
+
+    // 🔍 1. KV kontrolü (işlem zaten başlatılmış mı?)
+    const kvKey = `${get}:${name}`;
+    const trackingUrl = await env.FCE_KV.get(kvKey);
+    if (trackingUrl) {
+      return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
+    }
+
+    // 🔍 2. GitHub Release'de var mı?
+    const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+      headers: {
+        Authorization: `token ${env.GTKK}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "FCE Worker"
       }
-    } else {
-      return new Response(
-        "\nMissing parameters!\n\nUsage:\ncurl fce.gmrec72.workers.dev?get=boot_img&url=<url>\n\nExample:\ncurl fce.gmrec72.workers.dev?get=boot_img&url=https://example.com/rom.zip\n\n",
-        { status: 400 }
-      );
+    });
+
+    if (releaseRes.ok) {
+      const release = await releaseRes.json();
+      const expectedName = `${get}_${name}.zip`;
+      const asset = release.assets.find(a => a.name === expectedName);
+      if (asset) {
+        return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
+      }
     }
 
-    const response = await fetch(url, { method: "HEAD" });
-    if (!response.ok) {
-      return new Response("\nThe provided URL is not accessible.\n", { status: 400 });
-    }
-
-    const fileName = url.split("/").pop();
-    const romName = fileName.split(".zip")[0];
-
-    // KV ile check et
-    const trackKey = `processing_${romName}_${get}`;
-    const existingTrack = await env.FCE_KV.get(trackKey);
-
-    if (existingTrack) {
-      console.log("⚠️ Existing task found in KV:", existingTrack);
-      return new Response(`\n⚙️ Already processing...\nTrack progress: ${existingTrack}`, { status: 200 });
-    }
-
-    // GitHub tetikleme
-    const headers = {
-      Authorization: `token ${env.GTKK}`,
-      Accept: "application/vnd.github.v3+json",
-      "Content-Type": "application/json",
-      "User-Agent": "Cloudflare Worker",
-    };
-
-    const BaseUrl = "https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml";
-    const githubDispatchUrl = `${BaseUrl}/dispatches`;
-    const TRACK_URL = `${BaseUrl}/runs`;
-
+    // 🧠 3. Yeni görev tetikle → KV'ye geçici olarak kaydet (2 dakika TTL)
     const track = Date.now().toString();
-    const data = {
-      ref: "main",
-      inputs: {
-        url,
-        track,
-        get
-      }
-    };
+    await env.FCE_KV.put(kvKey, `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/runs`, {
+      expirationTtl: 120
+    });
 
-    // 🧪 Log GitHub’a yollanacak veri
-    console.log("Dispatch Data →", JSON.stringify(data));
+    // 🚀 GitHub Actions tetikleme
+    const dispatchRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${env.GTKK}`,
+        Accept: "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+        "User-Agent": "FCE Worker"
+      },
+      body: JSON.stringify({
+        ref: "main",
+        inputs: {
+          url,
+          track,
+          get
+        }
+      })
+    });
 
-    try {
-      const githubResponse = await fetch(githubDispatchUrl, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify(data),
-      });
-
-      if (githubResponse.ok) {
-        // ✔️ Görev başarılı tetiklendi, KV’ye yaz
-        await env.FCE_KV.put(trackKey, `${BaseUrl}/runs`, { expirationTtl: 180 }); // 3 dakika beklesin
-
-        return new Response(`\n✅ Build started for ${romName} [${get}]\nTrack progress: ${BaseUrl}/runs\n`, {
-          status: 200,
-        });
-      } else {
-        const githubResponseText = await githubResponse.text();
-        return new Response(`GitHub Response Error: ${githubResponseText}`, {
-          status: 500,
-        });
-      }
-    } catch (error) {
-      return new Response(`Error: ${error.message}`, { status: 500 });
+    if (dispatchRes.ok) {
+      return new Response(`✅ Build started for ${name} [${get}]\nTrack progress: https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/runs`, { status: 200 });
     }
-  },
-};
+
+    const err = await dispatchRes.text();
+    return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
+  }
+}
