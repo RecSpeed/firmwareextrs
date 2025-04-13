@@ -6,7 +6,7 @@ on:
       url:
         required: true
       get:
-        required: false
+        required: true
       track:
         required: false
 
