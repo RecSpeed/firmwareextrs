@@ -1,117 +1,142 @@
-name: FCE
+name: Firmware Extraction
 
 on:
   workflow_dispatch:
     inputs:
       url:
+        description: 'Firmware download URL'
         required: true
       track:
+        description: 'Tracking ID'
         required: false
       image_type:
+        description: 'Image type to extract'
         required: true
         default: 'boot'
-        description: 'Image type to extract (boot, recovery, modem)'
+        type: choice
+        options:
+          - boot
+          - recovery
+          - modem
+
+env:
+  MAX_RETRIES: 3
+  RETRY_DELAY: 5
 
 jobs:
-  extract_image:
-    name: ${{ github.event.inputs.track }}
+  extract:
+    name: ${{ github.event.inputs.track || 'manual-run' }}
     runs-on: ubuntu-latest
-    env:
-      URL: ${{ github.event.inputs.url }}
-      IMAGE_TYPE: ${{ github.event.inputs.image_type }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Setup Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip p7zip-full aria2
-          git clone https://github.com/vm03/payload_dumper.git tools
+          sudo apt-get install -y \
+            python3-pip \
+            p7zip-full \
+            aria2 \
+            brotli \
+            simg2img
           pip install -r ./tools/requirements.txt
 
-      - name: Download firmware
+      - name: Download Firmware
         run: |
-          aria2c -x 7 -s 7 -k 1M --out=firmware.zip "$URL"
-          7z x firmware.zip -oextracted
-          rm firmware.zip
-
-      - name: Extract images
-        run: |
-          cd extracted
-          rom_name=$(basename "$URL" .zip)
-          mkdir -p ../release
-          found_files=""
-
-          case "$IMAGE_TYPE" in
-            "boot")
-              search_files=("boot.img")
-              output_file="boot_img_${rom_name}.zip"
-              ;;
-            "recovery")
-              search_files=("recovery.img")
-              output_file="recovery_img_${rom_name}.zip"
-              ;;
-            "modem")
-              search_files=("NON-HLOS.bin" "md1img.img" "modem.bin")
-              output_file="modem_img_${rom_name}.zip"
-              ;;
-            *)
-              echo "Unsupported image type: $IMAGE_TYPE"
-              exit 1
-              ;;
-          esac
-
-          # Check in extracted files first
-          for file in "${search_files[@]}"; do
-            if [ -f "$file" ]; then
-              echo "Found $file directly in ZIP."
-              7z a "../release/$output_file" "$file"
-              found_files="true"
+          for i in $(seq 1 $MAX_RETRIES); do
+            if aria2c -x 8 -s 8 -k 1M --out=firmware.zip "$URL"; then
               break
+            elif [ $i -eq $MAX_RETRIES ]; then
+              echo "Failed to download after $MAX_RETRIES attempts"
+              exit 1
+            else
+              echo "Retrying in $RETRY_DELAY seconds..."
+              sleep $RETRY_DELAY
             fi
           done
 
-          # If not found, check payload.bin
-          if [ -z "$found_files" ] && [ -f "payload.bin" ]; then
-            echo "Extracting from payload.bin..."
-            
-            if [ "$IMAGE_TYPE" = "modem" ]; then
-              ../tools/payload_dumper.py --out . --images modem* payload.bin || true
-              for file in "${search_files[@]}"; do
-                if [ -f "$file" ]; then
-                  7z a "../release/$output_file" "$file"
-                  found_files="true"
-                  break
-                fi
-              done
-            else
-              ../tools/payload_dumper.py --out . --images $IMAGE_TYPE payload.bin
-              if [ -f "$IMAGE_TYPE.img" ]; then
-                7z a "../release/$output_file" "$IMAGE_TYPE.img"
-                found_files="true"
+      - name: Extract Firmware
+        run: |
+          7z x firmware.zip -oextracted -y
+          rm -f firmware.zip
+
+      - name: Find and Process Images
+        id: extract
+        run: |
+          cd extracted
+          ROM_NAME=$(basename "$URL" .zip)
+          OUTPUT_FILE="${IMAGE_TYPE}_${ROM_NAME}.zip"
+          SEARCH_PATHS=(".", "firmware-update", "firmware", "images", "radio")
+
+          # File search patterns for each type
+          case "$IMAGE_TYPE" in
+            boot)
+              PATTERNS=("boot.img")
+              PAYLOAD_IMAGE="boot"
+              ;;
+            recovery)
+              PATTERNS=("recovery.img")
+              PAYLOAD_IMAGE="recovery"
+              ;;
+            modem)
+              PATTERNS=("NON-HLOS.bin" "md1img.img" "modem.bin" "modem.img")
+              PAYLOAD_IMAGE="modem*"
+              ;;
+          esac
+
+          # Search in all paths
+          FOUND=""
+          for path in "${SEARCH_PATHS[@]}"; do
+            [ ! -d "$path" ] && continue
+            for pattern in "${PATTERNS[@]}"; do
+              if [ -f "${path}/${pattern}" ]; then
+                echo "Found ${path}/${pattern}"
+                7z a "../release/$OUTPUT_FILE" "${path}/${pattern}"
+                FOUND="true"
+                break 2
               fi
-            fi
+            done
+          done
+
+          # Try payload.bin if not found
+          if [ -z "$FOUND" ] && [ -f "payload.bin" ]; then
+            echo "Extracting from payload.bin..."
+            python3 ../tools/payload_dumper.py --out . --images "$PAYLOAD_IMAGE" payload.bin
+            
+            # Check extracted files
+            for pattern in "${PATTERNS[@]}"; do
+              if [ -f "$pattern" ]; then
+                7z a "../release/$OUTPUT_FILE" "$pattern"
+                FOUND="true"
+                break
+              fi
+            done
           fi
 
-          if [ -z "$found_files" ]; then
-            echo "Error: No $IMAGE_TYPE files found in: ${search_files[*]}"
+          if [ -z "$FOUND" ]; then
+            echo "::error::No $IMAGE_TYPE files found in patterns: ${PATTERNS[*]}"
             exit 1
           fi
 
-      - name: Upload to Release
+          echo "OUTPUT_FILE=${OUTPUT_FILE}" >> $GITHUB_OUTPUT
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.extract.outputs.OUTPUT_FILE }}
+          path: release/${{ steps.extract.outputs.OUTPUT_FILE }}
+
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: release/*.zip
+          files: release/${{ steps.extract.outputs.OUTPUT_FILE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Completion Status
+      - name: Cleanup
         run: |
-          if [ "${{ job.status }}" == "success" ]; then
-            echo "✔️ $IMAGE_TYPE image extracted successfully"
-          else
-            echo "❌ Failed to extract $IMAGE_TYPE image"
-          fi
+          rm -rf extracted release
