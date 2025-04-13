@@ -10,7 +10,6 @@ on:
       get:
         required: true
 
-
 env:
   URL: ${{ github.event.inputs.url }}
   GET: ${{ github.event.inputs.get }}
@@ -49,11 +48,12 @@ jobs:
       - name: Create ZIP
         run: |
           rom_name=$(basename "$URL" .zip)
+          mkdir -p release
 
           if [ "$GET" = "boot_img" ] && [ -f "boot.img" ]; then
-            7z a "boot_img_${rom_name}.zip" boot.img
+            7z a "./release/boot_img_${rom_name}.zip" boot.img
           elif [ "$GET" = "recovery_img" ] && [ -f "recovery.img" ]; then
-            7z a "recovery_img_${rom_name}.zip" recovery.img
+            7z a "./release/recovery_img_${rom_name}.zip" recovery.img
           else
             echo "Requested image not found"
             exit 1
@@ -62,7 +62,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
+          tag_name: auto
+          name: Auto Firmware Extracts
           files: |
-            boot_img_*.zip
-            recovery_img_*.zip
+            release/*.zip
