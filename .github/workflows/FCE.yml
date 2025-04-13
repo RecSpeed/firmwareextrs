@@ -5,44 +5,47 @@ on:
     inputs:
       url:
         required: true
+      track:
+        required: true
       get:
         required: true
-      track:
-        required: false
-
-env:
-  URL: ${{ github.event.inputs.url }}
-  GET: ${{ github.event.inputs.get }}
 
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
+    env:
+      URL: ${{ github.event.inputs.url }}
+      GET: ${{ github.event.inputs.get }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip p7zip-full aria2
           git clone https://github.com/vm03/payload_dumper.git tools
-          pip install -r ./tools/requirements.txt
+          pip install -r tools/requirements.txt
 
-      - name: Download firmware
+      - name: Download and Extract
         run: |
-          aria2c -x 7 -s 7 -k 1M --continue --out=firmware.zip "$URL"
+          aria2c -x 8 "$URL" -o firmware.zip
           7z x firmware.zip -o./
           rm firmware.zip
 
-      - name: Extract boot image
+      - name: Extract boot.img
+        run: |
+          if [ -f "payload.bin" ]; then
+            python3 ./tools/payload_dumper.py --out . --images boot payload.bin
+          fi
+
+      - name: Create ZIP
         run: |
           rom_name=$(basename "$URL" .zip)
-          if [ -f payload.bin ]; then
-            ./tools/payload_dumper.py --images boot --out . payload.bin
-          fi
-          if [ -f boot.img ]; then
-            7z a "boot_img_${rom_name}.zip" boot.img
+          mkdir -p release
+          if [ -f "boot.img" ]; then
+            7z a "./release/boot_img_${rom_name}.zip" boot.img
           else
             echo "boot.img not found"
             exit 1
@@ -52,4 +55,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: boot_img_*.zip
+          files: release/*.zip
+
+      - name: End of Process
+        run: |
+          echo "✔️ boot.img extraction completed"
