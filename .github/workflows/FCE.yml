@@ -5,16 +5,22 @@ on:
     inputs:
       url:
         required: true
+        type: string
+      get:
+        required: true
+        type: string
       track:
-        required: false
+        required: true
+        type: string
 
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
+
     env:
       URL: ${{ github.event.inputs.url }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GET: ${{ github.event.inputs.get }}
 
     steps:
       - uses: actions/checkout@v4
@@ -24,44 +30,58 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-pip p7zip-full aria2
           git clone https://github.com/vm03/payload_dumper.git tools
-          pip install -r ./tools/requirements.txt
+          pip install -r tools/requirements.txt
 
-      - name: Download firmware
+      - name: Download ZIP
         run: |
-          aria2c -x 7 -s 7 -k 1M --out=firmware.zip "$URL"
-          7z x firmware.zip -oextracted
-          rm firmware.zip
+          aria2c -x 8 -s 8 -k 1M -o rom.zip "$URL"
+          7z x rom.zip -o./ || exit 1
 
-      - name: Extract boot.img
+      - name: Extract target
         run: |
-          cd extracted
           rom_name=$(basename "$URL" .zip)
-          mkdir -p ../release
 
-          if [ -f "boot.img" ]; then
-            echo "Found boot.img directly in ZIP."
-            7z a "../release/boot_img_${rom_name}.zip" "boot.img"
-          elif [ -f "payload.bin" ]; then
-            echo "Extracting boot.img from payload.bin..."
-            ../tools/payload_dumper.py --out . --images boot payload.bin
-            if [ -f "boot.img" ]; then
-              7z a "../release/boot_img_${rom_name}.zip" "boot.img"
+          if [ "$GET" = "boot_img" ]; then
+            if [ -f boot.img ]; then
+              echo "boot.img extracted directly from ZIP."
+              7z a "boot_img_${rom_name}.zip" boot.img
+            elif [ -f payload.bin ]; then
+              python3 tools/payload_dumper.py --images boot --out . payload.bin || exit 1
+              7z a "boot_img_${rom_name}.zip" boot.img
             else
-              echo "boot.img not found in payload."
-              exit 1
+              echo "boot.img and payload.bin not found."; exit 1
+            fi
+
+          elif [ "$GET" = "init_boot_img" ]; then
+            if [ -f payload.bin ]; then
+              python3 tools/payload_dumper.py --images init_boot --out . payload.bin || exit 1
+              7z a "init_boot_img_${rom_name}.zip" init_boot.img
+            else
+              echo "payload.bin not found."; exit 1
+            fi
+
+          elif [ "$GET" = "settings_apk" ]; then
+            if [ -f system_ext.img ]; then
+              7z x system_ext.img -osystem_ext || (echo "system_ext.img could not be extracted." && exit 1)
+              SETTINGS_APK=$(find system_ext -name Settings.apk | head -n 1)
+              if [ -f "$SETTINGS_APK" ]; then
+                cp "$SETTINGS_APK" .
+                7z a "settings_apk_${rom_name}.zip" Settings.apk
+              else
+                echo "Settings.apk not found in system_ext.img"; exit 1
+              fi
+            else
+              echo "system_ext.img not found."; exit 1
             fi
           else
-            echo "Neither boot.img nor payload.bin found."
-            exit 1
+            echo "Unknown GET type: $GET"; exit 1
           fi
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: auto
-          files: release/*.zip
+          tag_name: ${{ github.event.inputs.get }}
+          files: |
+            *_${{ github.event.inputs.url | split('/') | last | replace('.zip', '') }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: ✅ Done
-        run: echo "✔️ boot.img extraction job complete"
