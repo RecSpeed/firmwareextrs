@@ -5,14 +5,16 @@ on:
     inputs:
       url:
         required: true
-      track:
-        required: true
       get:
         required: true
+      track:
+        required: false
 
 env:
   URL: ${{ github.event.inputs.url }}
   GET: ${{ github.event.inputs.get }}
+  TRACK: ${{ github.event.inputs.track }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   FCE:
@@ -24,50 +26,55 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip p7zip-full aria2
+          sudo apt update
+          sudo apt install -y python3-pip p7zip-full aria2
           git clone https://github.com/vm03/payload_dumper.git tools
-          pip install -r ./tools/requirements.txt
+          pip install -r tools/requirements.txt
 
       - name: Download firmware
         run: |
-          aria2c -x 7 -s 7 -k 1M --out=firmware.zip "$URL"
+          aria2c -x 7 -s 7 --out=firmware.zip "$URL"
           7z x firmware.zip -o./
+          rm firmware.zip
 
       - name: Extract images
         run: |
-          if [ -f payload.bin ]; then
+          if [ -f "payload.bin" ]; then
             ./tools/payload_dumper.py --out . --images boot,recovery payload.bin
           else
-            echo "No payload.bin found."
+            echo "payload.bin not found"
           fi
 
-      - name: Create ZIP or mark failure
+      - name: Create ZIP
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
 
-          if [ "$GET" = "boot_img" ] && [ -f boot.img ]; then
-            7z a release/boot_img_${rom_name}.zip boot.img
-          elif [ "$GET" = "recovery_img" ] && [ -f recovery.img ]; then
-            7z a release/recovery_img_${rom_name}.zip recovery.img
+          if [ "$GET" = "boot_img" ] && [ -f "boot.img" ]; then
+            7z a "./release/boot_img_${rom_name}.zip" boot.img
+          elif [ "$GET" = "recovery_img" ] && [ -f "recovery.img" ]; then
+            7z a "./release/recovery_img_${rom_name}.zip" recovery.img
           else
             echo "Requested image not found"
+
             FILE="v.json"
             NEW_ENTRY='"'${rom_name}'": {
-              "'${GET}'_zip": "false"
-            }'
+  "'${GET}'_zip": "false"
+}'
+
             if [ ! -f "$FILE" ]; then
               echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
             else
               sed -i '$d' "$FILE"
               echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
             fi
+
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
             git add v.json
             git commit -m "mark failure for $rom_name"
             git push
+
             exit 1
           fi
 
@@ -83,18 +90,25 @@ jobs:
           rom_name=$(basename "$URL" .zip)
           FILE="v.json"
           link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${GET}_${rom_name}.zip"
+
           NEW_ENTRY='"'${rom_name}'": {
-            "'${GET}'_zip": "true",
-            "'${GET}'_link": "'${link}'"
-          }'
+  "'${GET}'_zip": "true",
+  "'${GET}'_link": "'${link}'"
+}'
+
           if [ ! -f "$FILE" ]; then
             echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
           else
             sed -i '$d' "$FILE"
             echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
           fi
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add v.json
-          git commit -m "update $GET for $rom_name"
+          git commit -m "update ${GET} for $rom_name"
           git push
+
+      - name: Done
+        run: echo "✅ Done for $GET"
+        continue-on-error: true
