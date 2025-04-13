@@ -14,40 +14,46 @@ jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
-
     env:
       URL: ${{ github.event.inputs.url }}
-      GET: ${{ github.event.inputs.get }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Tools
+      - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y aria2 p7zip-full python3-pip
+          sudo apt-get update
+          sudo apt-get install -y python3-pip p7zip-full aria2
           git clone https://github.com/vm03/payload_dumper.git tools
-          pip install -r tools/requirements.txt
+          pip install -r ./tools/requirements.txt
 
-      - name: Download & Extract
+      - name: Download firmware
         run: |
-          aria2c -x 8 -s 8 -k 1M "$URL" -o rom.zip
-          7z x rom.zip
-          rm rom.zip
+          aria2c -x 7 -s 7 -k 1M --out=firmware.zip "$URL"
+          7z x firmware.zip -oextracted
+          rm firmware.zip
 
-      - name: Extract boot image
+      - name: Extract boot.img
         run: |
+          cd extracted
           rom_name=$(basename "$URL" .zip)
-          if [ -f payload.bin ]; then
-            python3 tools/payload_dumper.py --out . --images $GET payload.bin
-            if [ -f "$GET.img" ]; then
-              7z a "${GET}_${rom_name}.zip" "$GET.img"
+          mkdir -p ../release
+
+          if [ -f "boot.img" ]; then
+            echo "Found boot.img directly in ZIP."
+            7z a "../release/boot_img_${rom_name}.zip" "boot.img"
+          elif [ -f "payload.bin" ]; then
+            echo "Extracting boot.img from payload.bin..."
+            ../tools/payload_dumper.py --out . --images boot payload.bin
+            if [ -f "boot.img" ]; then
+              7z a "../release/boot_img_${rom_name}.zip" "boot.img"
             else
-              echo "$GET.img not extracted."
+              echo "boot.img not found in payload."
               exit 1
             fi
           else
-            echo "payload.bin not found."
+            echo "Neither boot.img nor payload.bin found."
             exit 1
           fi
 
@@ -55,7 +61,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: |
-            boot_img_*.zip
+          files: release/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: ✅ Done
+        run: echo "✔️ boot.img extraction job complete"
