@@ -54,7 +54,8 @@ export default {
       headers: {
         Authorization: `token ${env.GTKK}`,
         Accept: "application/vnd.github.v3+json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": "FirmwareExtractorBot"  // <-- Burası çok önemli
       },
       body: JSON.stringify({
         ref: "main",
