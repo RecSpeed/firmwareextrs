@@ -92,39 +92,48 @@ export default {
     });
 
     if (dispatchRes.ok) {
-      const TRACK_URL = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/runs`;
+  const pollingLimit = 12; // 60 saniye = 12 * 5s
+  for (let i = 0; i < pollingLimit; i++) {
+    await new Promise(r => setTimeout(r, 5000)); // 5 saniye bekle
 
-      const pollingLimit = 12; // 12 * 5s = 60s
-      for (let i = 0; i < pollingLimit; i++) {
-        await new Promise(r => setTimeout(r, 5000)); // 5 saniye bekle
+    const trackRes = await fetch(TRACK_URL, { headers });
+    if (trackRes.ok) {
+      const data = await trackRes.json();
+      const run = data.workflow_runs.find(w => w.head_branch === "main" && w.name === track);
 
-        const trackRes = await fetch(TRACK_URL, {
-          method: "GET",
-          headers: {
-            Authorization: `token ${env.GTKK}`,
-            Accept: "application/vnd.github.v3+json",
-            "User-Agent": "FCE Worker"
-          }
-        });
-
-        if (trackRes.ok) {
-          const data = await trackRes.json();
-          const run = data.workflow_runs.find(w => w.head_branch === "main" && w.name === track);
-
-          if (run && run.status === "completed") {
-            if (run.conclusion === "success") {
-              return new Response(`✅ Track complete for ${name} [${get}]. Check release.`, { status: 200 });
-            } else if (run.conclusion === "failure") {
-              return new Response(`❌ Requested image (${get}) not found or failed.`, { status: 404 });
+      if (run && run.status === "completed") {
+        // ✅ Success -> v.json kontrol et
+        if (run.conclusion === "success") {
+          try {
+            const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
+            if (vjson.ok) {
+              const data = await vjson.json();
+              const found = Object.entries(data).find(([key]) => key.startsWith(name));
+              if (found) {
+                const [, values] = found;
+                if (values[`${get}_zip`] === "false") {
+                  return new Response(`❌ Requested image (${get}) not found in release.`, { status: 404 });
+                }
+                const dlLink = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
+                return new Response(`link: ${dlLink}`, { status: 200 });
+              }
             }
+          } catch (e) {
+            return new Response("Build succeeded but v.json couldn't be read.", { status: 500 });
           }
         }
-      }
 
-      return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, {
-        status: 202
-      });
+        // ❌ Build bitti ama başarısız olduysa
+        if (run.conclusion === "failure") {
+          return new Response(`❌ Requested image (${get}) not found or failed.`, { status: 404 });
+        }
+      }
     }
+  }
+
+  return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, { status: 202 });
+}
+
 
     const err = await dispatchRes.text();
     return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
