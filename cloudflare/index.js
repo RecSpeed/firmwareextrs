@@ -3,118 +3,128 @@ export default {
     const urlParams = new URL(req.url).searchParams;
     let url = urlParams.get("url");
 
-    if (!url) {
-      return new Response("Missing 'url' parameter.", { status: 400 });
+    if (!url || !url.includes(".zip")) {
+      return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
     }
 
-    // Sadece .zip destekleniyor
-    if (!url.includes(".zip")) {
-      return new Response("Only .zip URLs are supported.", { status: 400 });
-    }
+    // Sadece .zip'e normalize et
+    url = url.split(".zip")[0] + ".zip";
+    const fileName = url.split("/").pop();
+    const name = fileName.replace(".zip", "");
+    const get = "boot_img"; // sadece boot_img destekleniyor
 
-    // CDN yönlendirme
-    const domains = [
-      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
-      "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
+    // CDN dönüşümü
+    const cdnDomains = [
+      "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
+      "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
+      "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
     ];
-    for (const domain of domains) {
+    for (const domain of cdnDomains) {
       if (url.includes(domain)) {
         url = url.replace(domain, "bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com");
         break;
       }
     }
 
-    url = url.split(".zip")[0] + ".zip";
-    const name = url.split("/").pop().replace(".zip", "");
-    const expectedFile = `boot_img_${name}.zip`;
-
-    // 1️⃣ Release kontrolü
-    const release = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto`, {
+    const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
       headers: {
         Authorization: `Bearer ${env.GTKK}`,
-        "User-Agent": "firmware-checker",
-        Accept: "application/vnd.github+json"
+        Accept: "application/vnd.github+json",
+        "User-Agent": "FCE Worker"
       }
     });
 
-    if (release.ok) {
-      const relData = await release.json();
-      const found = relData.assets.find(a => a.name === expectedFile);
-      if (found) {
-        return new Response(`link: ${found.browser_download_url}`, { status: 200 });
+    if (releaseRes.ok) {
+      const release = await releaseRes.json();
+      const asset = release.assets.find(a => a.name === `boot_img_${name}.zip`);
+      if (asset) {
+        return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
       }
     }
 
-    // 2️⃣ v.json kontrolü
-    try {
-      const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-      if (vjson.ok) {
-        const data = await vjson.json();
-        const entry = Object.entries(data).find(([key]) => key.startsWith(name));
-        if (entry) {
-          const [_, values] = entry;
-          if (values.boot_img_zip === "false") {
-            return new Response("❌ boot.img not found in previous extraction.", { status: 404 });
+    // Eğer daha önce tetiklendiyse ve halen işleniyorsa aynı işlemi başlatma
+    const kvKey = `${get}:${name}`;
+    const existingTrack = await env.FCE_KV.get(kvKey);
+    if (existingTrack) {
+      // Mevcut job varsa, sonucu kontrol edelim
+      const runStatusRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`, {
+        headers: {
+          Authorization: `Bearer ${env.GTKK}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "FCE Worker"
+        }
+      });
+
+      if (runStatusRes.ok) {
+        const data = await runStatusRes.json();
+        const found = data.workflow_runs.find(w => w.name === existingTrack && w.head_branch === "main");
+        if (found && found.status === "completed") {
+          if (found.conclusion === "success") {
+            const rel = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+              headers: {
+                Authorization: `Bearer ${env.GTKK}`,
+                Accept: "application/vnd.github+json",
+                "User-Agent": "FCE Worker"
+              }
+            });
+            if (rel.ok) {
+              const json = await rel.json();
+              const ready = json.assets.find(a => a.name === `boot_img_${name}.zip`);
+              if (ready) {
+                return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
+              }
+            }
+            return new Response("✅ Build done, but release not yet updated.", { status: 202 });
+          } else {
+            return new Response("❌ Build failed or file not found.", { status: 404 });
           }
         }
       }
-    } catch (_) {}
+    }
 
-    // 3️⃣ GitHub Actions Dispatch & Track
+    // Yeni istek gönder
     const track = Date.now().toString();
-    const headers = {
-      Authorization: `Bearer ${env.GTKK}`,
-      "User-Agent": "firmware-worker",
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json"
-    };
+    await env.FCE_KV.put(kvKey, track, { expirationTtl: 180 });
 
-    const dispatch = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
+    const dispatchRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches`, {
       method: "POST",
-      headers,
+      headers: {
+        Authorization: `Bearer ${env.GTKK}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "FCE Worker",
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         ref: "main",
-        inputs: {
-          url,
-          track,
-          get: "boot_img"
-        }
+        inputs: { url, get, track }
       })
     });
 
-    if (!dispatch.ok) {
-      const err = await dispatch.text();
-      return new Response(`GitHub Dispatch Error: ${err}`, { status: 500 });
+    if (!dispatchRes.ok) {
+      const errText = await dispatchRes.text();
+      return new Response(`GitHub Dispatch Error: ${errText}`, { status: 500 });
     }
 
-    // 4️⃣ Track sonucu bekleniyor
-    const trackUrl = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
-    for (let i = 0; i < 50; i++) {
-      await new Promise(res => setTimeout(res, 5000)); // 5 saniye bekle
+    // Polling başlasın: 30x5s = 150s bekle
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const checkRelease = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+        headers: {
+          Authorization: `Bearer ${env.GTKK}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "FCE Worker"
+        }
+      });
 
-      const runsRes = await fetch(trackUrl, { headers });
-      if (runsRes.ok) {
-        const runs = await runsRes.json();
-        const found = runs.workflow_runs.find(run => run.name === track && run.head_branch === "main");
-        if (found && found.status === "completed") {
-          if (found.conclusion === "success") {
-            // Bitmiş, release tekrar kontrol
-            const newRelease = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto`, { headers });
-            if (newRelease.ok) {
-              const rel = await newRelease.json();
-              const asset = rel.assets.find(a => a.name === expectedFile);
-              if (asset) {
-                return new Response(`link: ${asset.browser_download_url}`, { status: 200 });
-              }
-            }
-            return new Response("✅ Completed, but no link found in release.", { status: 200 });
-          } else {
-            return new Response("❌ Process failed. boot.img not found.", { status: 404 });
-          }
+      if (checkRelease.ok) {
+        const rel = await checkRelease.json();
+        const ready = rel.assets.find(a => a.name === `boot_img_${name}.zip`);
+        if (ready) {
+          return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
         }
       }
     }
 
     return new Response("⏳ Timeout: Process did not complete in time.", { status: 202 });
   }
-};
+}
