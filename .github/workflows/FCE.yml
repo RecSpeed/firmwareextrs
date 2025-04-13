@@ -46,7 +46,6 @@ jobs:
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
-
           if [ -f "boot.img" ]; then
             7z a "./release/boot_img_${rom_name}.zip" boot.img
           else
@@ -58,8 +57,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: |
-            release/*.zip
+          files: release/*.zip
 
       - name: ✅ Finished
         run: echo "✔️ boot_img extraction completed"
