@@ -3,7 +3,15 @@ export default {
     try {
       const urlParams = new URL(req.url, "https://dummy.url").searchParams;
       let url = urlParams.get("url");
-      const get = urlParams.get("get") || "boot_img";
+      const get = urlParams.get("get") || "boot_img"; // Varsayılan: boot_img
+
+      // Geçerli image tiplerini kontrol et
+      if (get !== "boot_img" && get !== "recovery_img") {
+        return jsonResponse(400, {
+          status: "error",
+          message: "Invalid 'get' parameter. Use boot_img or recovery_img"
+        });
+      }
 
       if (!url || !url.includes(".zip")) {
         return jsonResponse(400, {
@@ -45,7 +53,8 @@ export default {
           return jsonResponse(200, {
             status: "ready",
             download_url: asset.browser_download_url,
-            filename: `${get}_${name}.zip`
+            filename: `${get}_${name}.zip`,
+            image_type: get
           });
         }
       }
@@ -57,7 +66,8 @@ export default {
         return jsonResponse(200, {
           status: "processing",
           tracking_url: `https://github.com/RecSpeed/firmwareextrs/actions`,
-          message: "This firmware is already being processed"
+          message: `This firmware is already being processed for ${get.replace('_', '.')}`,
+          image_type: get
         });
       }
 
@@ -75,7 +85,11 @@ export default {
         },
         body: JSON.stringify({
           ref: "main",
-          inputs: { url, track }
+          inputs: { 
+            url, 
+            track,
+            image_type: get // Yeni parametre
+          }
         })
       });
 
@@ -90,7 +104,8 @@ export default {
       return jsonResponse(200, {
         status: "processing",
         tracking_url: `https://github.com/RecSpeed/firmwareextrs/actions`,
-        message: "Processing started for firmware"
+        message: `Processing started for ${get.replace('_', '.')}`,
+        image_type: get
       });
 
     } catch (error) {
@@ -102,7 +117,6 @@ export default {
   }
 };
 
-// Helper function for JSON responses
 function jsonResponse(status, data) {
   return new Response(JSON.stringify(data), {
     status,
