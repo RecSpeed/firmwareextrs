@@ -29,10 +29,29 @@ export default {
     const kvKey = `${get}:${name}`;
 
     // 1️⃣ KV kontrolü
-    const trackingUrl = await env.FCE_KV.get(kvKey);
-    if (trackingUrl) {
-      return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
+if (trackingUrl) {
+  // Eğer KV'de kayıt varsa, v.json'da bitmiş bir işlem var mı kontrol et
+  try {
+    const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
+    if (vjson.ok) {
+      const data = await vjson.json();
+      const found = Object.entries(data).find(([key]) => key.startsWith(name));
+      if (found) {
+        const [, values] = found;
+        if (values[`${get}_zip`] === "false") {
+          return new Response(`❌ Requested image (${get}) not found (v.json).`, { status: 404 });
+        } else if (values[`${get}_zip`] === "true") {
+          const dl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
+          return new Response(`link: ${dl}`, { status: 200 });
+        }
+      }
     }
+  } catch (_) {}
+
+  // Eğer v.json'da bulamadıysa halen track ediliyordur
+  return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
+}
+
 
     // 2️⃣ Release kontrolü
     const releaseRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
