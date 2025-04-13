@@ -5,10 +5,10 @@ on:
     inputs:
       url:
         required: true
-      track:
-        required: false
       get:
         required: true
+      track:
+        required: false
 
 env:
   URL: ${{ github.event.inputs.url }}
@@ -33,8 +33,8 @@ jobs:
       - name: Download Firmware
         run: |
           aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --out='firmware.zip' "$URL"
-          7z x firmware.zip -o./ || true
-          rm -f firmware.zip
+          7z x firmware.zip -o./
+          rm firmware.zip
 
       - name: Extract Images
         run: |
@@ -42,20 +42,20 @@ jobs:
             echo "payload.bin found, extracting..."
             ./tools/payload_dumper.py --out . --images boot,recovery payload.bin
           else
-            echo "payload.bin not found"
+            echo "payload.bin not found, checking for raw images..."
           fi
 
-      - name: Create ZIP
+      - name: Create ZIP or mark failure
         run: |
           rom_name=$(basename "$URL" .zip)
           mkdir -p release
+
           if [ "$GET" = "boot_img" ] && [ -f "boot.img" ]; then
             7z a "./release/boot_img_${rom_name}.zip" boot.img
           elif [ "$GET" = "recovery_img" ] && [ -f "recovery.img" ]; then
             7z a "./release/recovery_img_${rom_name}.zip" recovery.img
           else
             echo "Requested image not found"
-
             FILE="v.json"
             NEW_ENTRY='"'${rom_name}'": {
               "'${GET}'_zip": "false"
@@ -71,9 +71,8 @@ jobs:
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
             git add v.json
-            git commit -m "mark failure for $rom_name"
+            git commit -m "mark failure for ${rom_name}"
             git push
-
             exit 1
           fi
 
@@ -84,7 +83,7 @@ jobs:
           name: Auto Firmware Extracts
           files: release/*.zip
 
-      - name: Update v.json
+      - name: Update v.json with link
         run: |
           rom_name=$(basename "$URL" .zip)
           FILE="v.json"
@@ -105,5 +104,10 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add v.json
-          git commit -m "update $GET for $rom_name"
+          git commit -m "update ${GET} for ${rom_name}"
           git push
+
+      - name: End of Process
+        run: |
+          echo "✔️ Process completed for ${GET} → ${URL}"
+        continue-on-error: true
