@@ -5,24 +5,23 @@ on:
     inputs:
       url:
         required: true
-      track:
-        required: true
       get:
-        required: true
+        required: false
+      track:
+        required: false
+
+env:
+  URL: ${{ github.event.inputs.url }}
+  GET: boot_img
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
 
-    env:
-      URL: ${{ github.event.inputs.url }}
-      GET: ${{ github.event.inputs.get }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
@@ -33,14 +32,13 @@ jobs:
 
       - name: Download Firmware
         run: |
-          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --out='firmware.zip' "$URL"
+          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --out=firmware.zip "$URL"
           7z x firmware.zip -o./
           rm firmware.zip
 
       - name: Extract boot.img
         run: |
           if [ -f "payload.bin" ]; then
-            echo "payload.bin found, extracting boot.img"
             ./tools/payload_dumper.py --out . --images boot payload.bin
           fi
 
@@ -52,25 +50,7 @@ jobs:
           if [ -f "boot.img" ]; then
             7z a "./release/boot_img_${rom_name}.zip" boot.img
           else
-            echo "boot.img not found"
-            FILE="v.json"
-            NEW_ENTRY='"'${rom_name}'": {
-              "boot_img_zip": "false"
-            }'
-
-            if [ ! -f "$FILE" ]; then
-              echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
-            else
-              sed -i '$d' "$FILE"
-              echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
-            fi
-
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git add v.json
-            git commit -m "mark failure for $rom_name"
-            git push
-
+            echo "Requested image not found"
             exit 1
           fi
 
@@ -78,30 +58,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          name: Auto Extracted Firmware
           files: |
-            release/boot_img_*.zip
+            release/*.zip
 
-      - name: Update v.json
-        run: |
-          rom_name=$(basename "$URL" .zip)
-          FILE="v.json"
-          link="https://github.com/RecSpeed/firmwareextrs/releases/download/auto/boot_img_${rom_name}.zip"
-
-          NEW_ENTRY='"'${rom_name}'": {
-            "boot_img_zip": "true",
-            "boot_img_link": "'${link}'"
-          }'
-
-          if [ ! -f "$FILE" ]; then
-            echo -e "{\n$NEW_ENTRY\n}" > "$FILE"
-          else
-            sed -i '$d' "$FILE"
-            echo -e ",\n$NEW_ENTRY\n}" >> "$FILE"
-          fi
-
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add v.json
-          git commit -m "add boot_img info for $rom_name"
-          git push
+      - name: ✅ Finished
+        run: echo "✔️ boot_img extraction completed"
