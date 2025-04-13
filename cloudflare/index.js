@@ -1,7 +1,7 @@
 // index.js (Cloudflare Worker)
 export default {
   async fetch(req, env) {
-    const urlParams = new URL(req.url).searchParams;
+    const urlParams = new URL(req.url, "https://dummy.url").searchParams;
     let url = urlParams.get("url");
     let get = urlParams.get("get") || "boot_img";
 
