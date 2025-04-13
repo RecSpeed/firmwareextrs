@@ -7,13 +7,13 @@ export default {
       return new Response("❌ Missing or invalid 'url' parameter (.zip required).", { status: 400 });
     }
 
-    // Sadece .zip'e normalize et
+    // Normalize URL
     url = url.split(".zip")[0] + ".zip";
     const fileName = url.split("/").pop();
     const name = fileName.replace(".zip", "");
-    const get = "boot_img"; // sadece boot_img destekleniyor
+    const get = "boot_img";
 
-    // CDN dönüşümü
+    // CDN override
     const cdnDomains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com",
       "cdnorg.d.miui.com", "bn.d.miui.com", "hugeota.d.miui.com",
@@ -42,11 +42,9 @@ export default {
       }
     }
 
-    // Eğer daha önce tetiklendiyse ve halen işleniyorsa aynı işlemi başlatma
     const kvKey = `${get}:${name}`;
     const existingTrack = await env.FCE_KV.get(kvKey);
     if (existingTrack) {
-      // Mevcut job varsa, sonucu kontrol edelim
       const runStatusRes = await fetch(`https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`, {
         headers: {
           Authorization: `Bearer ${env.GTKK}`,
@@ -74,7 +72,7 @@ export default {
                 return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
               }
             }
-            return new Response("✅ Build done, but release not yet updated.", { status: 202 });
+            return new Response("✅ Build done, release not yet ready.", { status: 202 });
           } else {
             return new Response("❌ Build failed or file not found.", { status: 404 });
           }
@@ -82,7 +80,7 @@ export default {
       }
     }
 
-    // Yeni istek gönder
+    // Yeni job tetikle
     const track = Date.now().toString();
     await env.FCE_KV.put(kvKey, track, { expirationTtl: 180 });
 
@@ -105,10 +103,10 @@ export default {
       return new Response(`GitHub Dispatch Error: ${errText}`, { status: 500 });
     }
 
-    // Polling başlasın: 30x5s = 150s bekle
+    // Build başlatıldı, bekleniyor
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 5000));
-      const checkRelease = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
+      const pollRes = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto", {
         headers: {
           Authorization: `Bearer ${env.GTKK}`,
           Accept: "application/vnd.github+json",
@@ -116,8 +114,8 @@ export default {
         }
       });
 
-      if (checkRelease.ok) {
-        const rel = await checkRelease.json();
+      if (pollRes.ok) {
+        const rel = await pollRes.json();
         const ready = rel.assets.find(a => a.name === `boot_img_${name}.zip`);
         if (ready) {
           return new Response(`link: ${ready.browser_download_url}`, { status: 200 });
@@ -127,4 +125,4 @@ export default {
 
     return new Response("⏳ Timeout: Process did not complete in time.", { status: 202 });
   }
-}
+};
