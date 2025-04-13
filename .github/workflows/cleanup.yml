@@ -1,0 +1,25 @@
+name: Cleanup Stale Processes
+on:
+  schedule:
+    - cron: '0 * * * *' # Her saat başı
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for stale runs
+        id: check
+        run: |
+          # 30 dakikadan eski run'ları bul
+          cutoff=$(date -d '30 minutes ago' -u +"%Y-%m-%dT%H:%M:%SZ")
+          runs=$(gh api -X GET "repos/RecSpeed/firmwareextrs/actions/runs?status=in_progress" | jq -r ".workflow_runs[] | select(.created_at < \"$cutoff\") | .id")
+          
+          echo "stale_runs=$(echo $runs | tr '\n' ' ')" >> $GITHUB_OUTPUT
+      
+      - name: Cancel stale runs
+        if: steps.check.outputs.stale_runs != ''
+        run: |
+          for run_id in ${{ steps.check.outputs.stale_runs }}; do
+            gh api -X POST "repos/RecSpeed/firmwareextrs/actions/runs/$run_id/cancel"
+          done
