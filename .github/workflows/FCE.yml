@@ -5,10 +5,8 @@ on:
     inputs:
       url:
         required: true
-      get:
-        required: true
       track:
-        required: true
+        required: false
 
 jobs:
   FCE:
