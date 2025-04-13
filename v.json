@@ -1,29 +1,34 @@
 {
-"marble-ota_full-OS2.0.5.0.VMRCNXM-user-15.0-360119838b": {
-  "boot_img_zip": "true",
-  "init_boot_img_zip": "false",
-  "vendor_boot_img_zip": "true",
-  "app_settings_zip": "true"
-}
-,
-"miui_TUCANAIDGlobal_V12.5.1.0.RFDIDXM_3097136ba6_11.0": {
-  "boot_img_zip": "true",
-  "init_boot_img_zip": "false",
-  "vendor_boot_img_zip": "false",
-  "app_settings_zip": "false"
-}
-,
-"miui_SKYGlobal_V14.0.4.0.TMWMIXM_7405e511f4_13.0": {
-  "boot_img_zip": "true",
-  "init_boot_img_zip": "false",
-  "vendor_boot_img_zip": "true",
-  "app_settings_zip": "true"
-}
-,
-"miui_MARBLEIDGlobal_OS1.0.9.0.UMRIDXM_5f98e39dbd_14.0": {
-  "boot_img_zip": "true",
-  "init_boot_img_zip": "false",
-  "vendor_boot_img_zip": "true",
-  "app_settings_zip": "true"
-}
+    "miui_TUCANA_V12.0.5.2.QFDCNXM_88649617b1_10.0": {
+        "boot_img_zip": "true",
+        "init_boot_img_zip": "false",
+        "vendor_boot_img_zip": "false",
+        "app_settings_zip": "false",
+        "boot_img_link": "",
+        "processing": "false"
+    },
+    "miui_MOONSTONE_V14.0.6.7.TMQCNXM_abcdef1234_13.0": {
+        "boot_img_zip": "true",
+        "init_boot_img_zip": "false",
+        "vendor_boot_img_zip": "true",
+        "app_settings_zip": "true",
+        "boot_img_link": "",
+        "vendor_boot_img_link": "",
+        "app_settings_link": "",
+        "processing": "false"
+    },
+    "miui_TUCANARUGlobal_V13.0.5.3.RFDRUXM_9813613bb0_11.0": {
+        "boot_img_zip": "true",
+        "init_boot_img_zip": "false",
+        "vendor_boot_img_zip": "false",
+        "app_settings_zip": "false",
+        "processing": "false"
+    },
+    "miui_TUCANARUGlobal_V13.0.5.2.RFDRUXM_9813613bb0_11.0": {
+        "boot_img_zip": "true",
+        "init_boot_img_zip": "false",
+        "vendor_boot_img_zip": "false",
+        "app_settings_zip": "false",
+        "processing": "false"
+    }
 }
