@@ -5,87 +5,63 @@ on:
     inputs:
       url:
         required: true
-      get:
-        required: true
       track:
         required: false
-
-env:
-  URL: ${{ github.event.inputs.url }}
-  GET: ${{ github.event.inputs.get }}
 
 jobs:
   FCE:
     name: ${{ github.event.inputs.track }}
     runs-on: ubuntu-latest
+    env:
+      URL: ${{ github.event.inputs.url }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache tools
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local/lib/python3*/site-packages
-            tools
-          key: ${{ runner.os }}-tools-${{ hashFiles('**/tools/*') }}
-          restore-keys: |
-            ${{ runner.os }}-tools-
-
-      - name: Install tools
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip p7zip-full aria2
           git clone https://github.com/vm03/payload_dumper.git tools
-          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
-          7z x erofs-utils.zip -otools
           pip install -r ./tools/requirements.txt
-          rm -f erofs-utils.zip
 
-      - name: Download ZIP
+      - name: Download firmware
         run: |
-          aria2c -x 7 -s 7 -k 1M --continue --out=rom.zip "$URL"
-          7z x rom.zip -o./
-          rm rom.zip
+          aria2c -x 7 -s 7 -k 1M --out=firmware.zip "$URL"
+          7z x firmware.zip -oextracted
+          rm firmware.zip
 
-      - name: Extract image based on input
-        id: extract
+      - name: Extract boot.img
         run: |
+          cd extracted
           rom_name=$(basename "$URL" .zip)
-          image_name="${GET%.img}"
+          mkdir -p ../release
 
-          if [ -f "${GET}.img" ]; then
-            echo "::set-output name=skip::true"
-            echo "Using existing ${GET}.img"
-          elif [ -f "boot.img" ] && [ "$GET" = "boot_img" ]; then
-            echo "::set-output name=skip::true"
-            echo "Found boot.img in ZIP"
+          if [ -f "boot.img" ]; then
+            echo "Found boot.img directly in ZIP."
+            7z a "../release/boot_img_${rom_name}.zip" "boot.img"
           elif [ -f "payload.bin" ]; then
-            ./tools/payload_dumper.py --out . --images "${GET%.img}" payload.bin
-            echo "::set-output name=skip::false"
+            echo "Extracting boot.img from payload.bin..."
+            ../tools/payload_dumper.py --out . --images boot payload.bin
+            if [ -f "boot.img" ]; then
+              7z a "../release/boot_img_${rom_name}.zip" "boot.img"
+            else
+              echo "boot.img not found in payload."
+              exit 1
+            fi
           else
-            echo "❌ payload.bin or direct image not found. Exiting."
+            echo "Neither boot.img nor payload.bin found."
             exit 1
           fi
-
-          if [ -f "${GET%.img}.img" ]; then
-            7z a "${GET}_${rom_name}.zip" "${GET%.img}.img"
-          else
-            echo "❌ ${GET}.img not extracted."
-            exit 1
-          fi
-
-          echo "filename=${GET}_${rom_name}.zip" >> $GITHUB_ENV
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.get }}
-          files: ${{ env.filename }}
+          tag_name: auto
+          files: release/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Success summary
-        run: echo "✔️ Uploaded ${{ env.filename }} to GitHub Release."
+      - name: ✅ Done
+        run: echo "✔️ boot.img extraction job complete"
