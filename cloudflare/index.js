@@ -8,7 +8,7 @@ export default {
       return new Response("Missing 'get' or 'url' parameter.", { status: 400 });
     }
 
-    // 📦 CDN yönlendirmesi
+    // CDN yönlendirme
     const domains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
       "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
@@ -28,28 +28,9 @@ export default {
     const name = url.split("/").pop().replace(".zip", "");
     const kvKey = `${get}:${name}`;
 
-    // 1️⃣ KV kontrolü (aynı görev hâlâ çalışıyor mu?)
+    // 1️⃣ KV kontrolü (aynı görev halen çalışıyor mu?)
     const trackingUrl = await env.FCE_KV.get(kvKey);
     if (trackingUrl) {
-      try {
-        const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
-        if (vjson.ok) {
-          const data = await vjson.json();
-          const found = Object.entries(data).find(([key]) => key.startsWith(name));
-          if (found) {
-            const [, values] = found;
-            if (values[`${get}_zip`] === "false") {
-              return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
-            } else if (values[`${get}_zip`] === "true") {
-              const dl = `https://github.com/RecSpeed/firmwareextrs/releases/download/auto/${get}_${name}.zip`;
-              return new Response(`link: ${dl}`, { status: 200 });
-            }
-          }
-        }
-      } catch (_) {
-        return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
-      }
-
       return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
     }
 
@@ -71,7 +52,7 @@ export default {
       }
     }
 
-    // 2.5️⃣ v.json kontrolü (daha önce çalıştı ama dosya yoksa)
+    // 2.5️⃣ v.json kontrolü
     try {
       const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
       if (vjson.ok) {
@@ -84,11 +65,9 @@ export default {
           }
         }
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (_) {}
 
-    // 3️⃣ Görev başlatılıyor
+    // 3️⃣ Yeni görev tetikleniyor
     const track = Date.now().toString();
     await env.FCE_KV.put(kvKey, `https://github.com/RecSpeed/firmwareextrs/actions`, {
       expirationTtl: 120
@@ -112,12 +91,13 @@ export default {
       })
     });
 
+    // 4️⃣ Dispatch sonrası build takibi
     if (dispatchRes.ok) {
-      // Polling yapılacak
       const pollingLimit = 12;
       const TRACK_URL = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
+
       for (let i = 0; i < pollingLimit; i++) {
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 5000)); // 5 saniye bekle
 
         const trackRes = await fetch(TRACK_URL, {
           headers: {
@@ -129,7 +109,9 @@ export default {
 
         if (trackRes.ok) {
           const data = await trackRes.json();
-          const run = data.workflow_runs.find(w => w.head_branch === "main" && w.name === track);
+          const run = data.workflow_runs.find(w =>
+            w.head_branch === "main" && w.head_commit?.message?.includes(track)
+          );
 
           if (run && run.status === "completed") {
             if (run.conclusion === "success") {
