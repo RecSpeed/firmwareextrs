@@ -89,7 +89,7 @@ export default {
 
     // 4️⃣ Track sonucu bekleniyor
     const trackUrl = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 50; i++) {
       await new Promise(res => setTimeout(res, 5000)); // 5 saniye bekle
 
       const runsRes = await fetch(trackUrl, { headers });
