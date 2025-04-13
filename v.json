@@ -1,28 +1,29 @@
+{
+"marble-ota_full-OS2.0.5.0.VMRCNXM-user-15.0-360119838b": {
+  "boot_img_zip": "true",
+  "init_boot_img_zip": "false",
+  "vendor_boot_img_zip": "true",
+  "app_settings_zip": "true"
+}
 ,
-"miui_TUCANA_V16.1.3.0.RFDCNXM_2a2aeb8727_11.0": {
-  "recovery_img_zip": "false"
+"miui_TUCANAIDGlobal_V12.5.1.0.RFDIDXM_3097136ba6_11.0": {
+  "boot_img_zip": "true",
+  "init_boot_img_zip": "false",
+  "vendor_boot_img_zip": "false",
+  "app_settings_zip": "false"
+}
 ,
-"miui_34UCANA_V15.1.3.0.RFDCNXM_2a2aeb8727_11.0": {
-    "recovery_img_zip": "false"
-  }
+"miui_SKYGlobal_V14.0.4.0.TMWMIXM_7405e511f4_13.0": {
+  "boot_img_zip": "true",
+  "init_boot_img_zip": "false",
+  "vendor_boot_img_zip": "true",
+  "app_settings_zip": "true"
+}
 ,
-"miui_gyhUCANA_V14.1.3.0.RFDCNXM_2a2aeb8727_11.0": {
-    "recovery_img_zip": "false"
-  }
-,
-"miui_ndUCANA_V12.5.4.0.RFDCNXM_7c05d34c85_11.0": {
-    "recovery_img_zip": "false"
-  }
-,
-"miui_kUCANA_V12.567.4.0.RFDCNXM_7c05d34c85_11.0": {
-    "recovery_img_zip": "false"
-  }
-,
-"miui_6UCANA_V12.56.4.0.RFDCNXM_7c05d34c85_11.0": {
-    "recovery_img_zip": "false"
-  }
-,
-"miui_cUCANA_V12.5.4.0.RFDCNXM_7c05d34c85_11.0": {
-    "recovery_img_zip": "false"
-  }
+"miui_MARBLEIDGlobal_OS1.0.9.0.UMRIDXM_5f98e39dbd_14.0": {
+  "boot_img_zip": "true",
+  "init_boot_img_zip": "false",
+  "vendor_boot_img_zip": "true",
+  "app_settings_zip": "true"
+}
 }
