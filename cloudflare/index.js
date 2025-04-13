@@ -52,7 +52,7 @@ export default {
       }
     }
 
-    // 2.5️⃣ v.json kontrolü (önceden işlenmiş ama dosya yoksa)
+    // 2.5️⃣ v.json kontrolü
     try {
       const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
       if (vjson.ok) {
@@ -61,15 +61,13 @@ export default {
         if (found) {
           const [, values] = found;
           if (values[`${get}_zip`] === "false") {
-            return new Response("Requested image not found.", { status: 404 });
+            return new Response("❌ Requested image not found.", { status: 404 });
           }
         }
       }
-    } catch (e) {
-      // JSON hatası varsa geç
-    }
+    } catch (e) {}
 
-    // 3️⃣ Yeni görev tetikleniyor (2 dakika geçici kilitle)
+    // 3️⃣ Dispatch ve Polling ile takip
     const track = Date.now().toString();
     await env.FCE_KV.put(kvKey, `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/runs`, {
       expirationTtl: 120
@@ -94,8 +92,37 @@ export default {
     });
 
     if (dispatchRes.ok) {
-      return new Response(`✅ Build started for ${name} [${get}]\nTrack progress: https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/runs`, {
-        status: 200
+      const TRACK_URL = `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/runs`;
+
+      const pollingLimit = 12; // 12 * 5s = 60s
+      for (let i = 0; i < pollingLimit; i++) {
+        await new Promise(r => setTimeout(r, 5000)); // 5 saniye bekle
+
+        const trackRes = await fetch(TRACK_URL, {
+          method: "GET",
+          headers: {
+            Authorization: `token ${env.GTKK}`,
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "FCE Worker"
+          }
+        });
+
+        if (trackRes.ok) {
+          const data = await trackRes.json();
+          const run = data.workflow_runs.find(w => w.head_branch === "main" && w.name === track);
+
+          if (run && run.status === "completed") {
+            if (run.conclusion === "success") {
+              return new Response(`✅ Track complete for ${name} [${get}]. Check release.`, { status: 200 });
+            } else if (run.conclusion === "failure") {
+              return new Response(`❌ Requested image (${get}) not found or failed.`, { status: 404 });
+            }
+          }
+        }
+      }
+
+      return new Response(`Track progress: https://github.com/RecSpeed/firmwareextrs/actions`, {
+        status: 202
       });
     }
 
