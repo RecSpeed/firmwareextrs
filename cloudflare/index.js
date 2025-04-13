@@ -8,6 +8,7 @@ export default {
       return new Response("Missing 'get' or 'url' parameter.", { status: 400 });
     }
 
+    // CDN yönlendirme
     const domains = [
       "ultimateota.d.miui.com", "superota.d.miui.com", "bigota.d.miui.com", "cdnorg.d.miui.com",
       "bn.d.miui.com", "hugeota.d.miui.com", "cdn-ota.azureedge.net", "airtel.bigota.d.miui.com"
@@ -27,10 +28,30 @@ export default {
     const name = url.split("/").pop().replace(".zip", "");
     const kvKey = `${get}:${name}`;
 
-    // 1️⃣ KV kontrolü - hâlihazırda işleniyor mu?
-    const existingTrack = await env.FCE_KV.get(kvKey);
-    if (existingTrack) {
-      return new Response(`\n\nTrack progress: ${existingTrack}\n`, { status: 200 });
+    // 🔍 Öncelikle v.json kontrolü yapılmalı
+    try {
+      const vjson = await fetch("https://raw.githubusercontent.com/RecSpeed/firmwareextrs/main/v.json");
+      if (vjson.ok) {
+        const data = await vjson.json();
+        const found = Object.entries(data).find(([key]) => key.startsWith(name));
+        if (found) {
+          const [, values] = found;
+          if (values[`${get}_zip`] === "false") {
+            return new Response(`❌ Requested image (${get}) not found.`, { status: 404 });
+          }
+          if (values[`${get}_zip`] === "true" && values[`${get}_link`]) {
+            return new Response(`link: ${values[`${get}_link`]}`, { status: 200 });
+          }
+        }
+      }
+    } catch (e) {
+      // sessizce geç
+    }
+
+    // 🔁 1. KV kontrolü (aynı görev halen çalışıyor mu?)
+    const trackingUrl = await env.FCE_KV.get(kvKey);
+    if (trackingUrl) {
+      return new Response(`\n\nTrack progress: ${trackingUrl}\n`, { status: 200 });
     }
 
     // 2️⃣ Release'de varsa link ver
