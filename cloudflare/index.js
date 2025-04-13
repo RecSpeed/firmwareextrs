@@ -100,6 +100,7 @@ export default {
     }
 
     // Bekleme süreci (Polling)
+// Bekleme süreci (Polling)
 for (let i = 0; i < 30; i++) {
   await new Promise(r => setTimeout(r, 5000));
   const statusCheck = await fetch("https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs", {
@@ -140,6 +141,7 @@ for (let i = 0; i < 30; i++) {
     }
   }
 }
+
 
 
     return new Response("⏳ Timeout: Process did not complete in time.", { status: 202 });
