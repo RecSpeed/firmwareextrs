@@ -7,6 +7,9 @@ on:
         required: true
       track:
         required: false
+      image_type:  # Yeni input
+        required: false
+        default: 'boot_img'
 
 jobs:
   FCE:
@@ -14,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       URL: ${{ github.event.inputs.url }}
+      IMAGE_TYPE: ${{ github.event.inputs.image_type || 'boot_img' }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -32,36 +36,34 @@ jobs:
           7z x firmware.zip -oextracted
           rm firmware.zip
 
-      - name: Extract boot.img
+      - name: Extract images
         run: |
           cd extracted
           rom_name=$(basename "$URL" .zip)
           mkdir -p ../release
 
-          if [ -f "boot.img" ]; then
-            echo "Found boot.img directly in ZIP."
-            7z a "../release/boot_img_${rom_name}.zip" "boot.img"
-          elif [ -f "payload.bin" ]; then
-            echo "Extracting boot.img from payload.bin..."
-            ../tools/payload_dumper.py --out . --images boot payload.bin
+          if [ "$IMAGE_TYPE" = "boot_img" ]; then
             if [ -f "boot.img" ]; then
+              echo "Found boot.img directly in ZIP."
               7z a "../release/boot_img_${rom_name}.zip" "boot.img"
+            elif [ -f "payload.bin" ]; then
+              echo "Extracting boot.img from payload.bin..."
+              ../tools/payload_dumper.py --out . --images boot payload.bin
+              if [ -f "boot.img" ]; then
+                7z a "../release/boot_img_${rom_name}.zip" "boot.img"
+              else
+                echo "boot.img not found in payload."
+                exit 1
+              fi
             else
-              echo "boot.img not found in payload."
+              echo "Neither boot.img nor payload.bin found."
               exit 1
             fi
-          else
-            echo "Neither boot.img nor payload.bin found."
-            exit 1
-          fi
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: auto
-          files: release/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: ✅ Done
-        run: echo "✔️ boot.img extraction job complete"
+          elif [ "$IMAGE_TYPE" = "recovery_img" ]; then
+            if [ -f "recovery.img" ]; then
+              echo "Found recovery.img directly in ZIP."
+              7z a "../release/recovery_img_${rom_name}.zip" "recovery.img"
+            elif [ -f "payload.bin" ]; then
+              echo "Extracting recovery.img from payload.bin..."
+              ../tools/payload_dumper.py --out . --images recovery payload.bin
+             
