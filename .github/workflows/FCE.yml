@@ -5,18 +5,18 @@ on:
     inputs:
       url:
         required: true
-        description: 'Firmware download URL'
+        description: 'Firmware ZIP URL'
       track:
         required: false
         description: 'Tracking ID'
       image_type:
         required: true
         default: 'boot'
-        description: 'boot/recovery/modem'
+        description: 'Image type (boot/recovery/modem)'
 
 env:
   SEARCH_PATHS: ". firmware-update firmware images radio"
-  MAX_ATTEMPTS: 3
+  MAX_RETRIES: 3
   RETRY_DELAY: 10
 
 jobs:
@@ -26,15 +26,10 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Verify Inputs
+      - name: Validate Inputs
         run: |
-          echo "Starting extraction for:"
-          echo "URL: ${{ inputs.url }}"
-          echo "Type: ${{ inputs.image_type }}"
-          echo "Track: ${{ inputs.track || 'N/A' }}"
-          
-          if [[ ! "${{ inputs.url }}" =~ .zip$ ]]; then
-            echo "::error::Invalid URL (must end with .zip)"
+          if [[ ! "${{ inputs.url }}" =~ \.zip($|\?) ]]; then
+            echo "::error::Invalid ZIP URL"
             exit 1
           fi
 
@@ -44,85 +39,69 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            android-sdk-libsparse-utils \
             p7zip-full \
             aria2 \
             brotli \
-            simg2img \
             python3-pip
+          sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
           pip install -r ./tools/requirements.txt
 
-      - name: Download Firmware (Retry Logic)
+      - name: Download Firmware
         run: |
-          for ((i=1; i<=$MAX_ATTEMPTS; i++)); do
-            if aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}"; then
-              break
-            elif [ $i -eq $MAX_ATTEMPTS ]; then
-              echo "::error::Download failed after $MAX_ATTEMPTS attempts"
-              exit 1
-            else
-              echo "Attempt $i failed, retrying in $RETRY_DELAY seconds..."
-              sleep $RETRY_DELAY
-            fi
+          for i in $(seq 1 $MAX_RETRIES); do
+            aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" && break
+            sleep $RETRY_DELAY
+            [ $i -eq $MAX_RETRIES ] && exit 1
           done
 
-      - name: Extract Firmware
+      - name: Extract and Process
+        id: process
         run: |
           7z x firmware.zip -oextracted -y
-          rm -f firmware.zip
-
-      - name: Locate Target Files
-        id: locate
-        run: |
           cd extracted
-          rom_name=$(basename "${{ inputs.url }}" .zip)
-          output_file="${{ inputs.image_type }}_${rom_name}.zip"
-          
-          declare -A file_patterns=(
+
+          declare -A patterns=(
             ["boot"]="boot.img"
             ["recovery"]="recovery.img"
             ["modem"]="NON-HLOS.bin md1img.img modem.bin modem.img"
           )
 
-          found_file=""
+          # Search in all paths
           for path in $SEARCH_PATHS; do
             [ ! -d "$path" ] && continue
-            for pattern in ${file_patterns[${{ inputs.image_type }}]}; do
+            for pattern in ${patterns[${{ inputs.image_type }}]}; do
               if [ -f "$path/$pattern" ]; then
-                found_file="$path/$pattern"
-                break 2
+                7z a "../release/${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip)" "$path/$pattern"
+                echo "output_file=${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip)" >> $GITHUB_OUTPUT
+                exit 0
               fi
             done
           done
 
-          if [ -z "$found_file" ] && [ -f "payload.bin" ]; then
-            echo "Extracting from payload..."
+          # Fallback to payload.bin
+          if [ -f "payload.bin" ]; then
             python3 ../tools/payload_dumper.py --out . --images "${{ inputs.image_type }}"* payload.bin
-            
-            for pattern in ${file_patterns[${{ inputs.image_type }}]}; do
+            for pattern in ${patterns[${{ inputs.image_type }}]}; do
               if [ -f "$pattern" ]; then
-                found_file="$pattern"
-                break
+                7z a "../release/${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip)" "$pattern"
+                echo "output_file=${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip)" >> $GITHUB_OUTPUT
+                exit 0
               fi
             done
           fi
 
-          if [ -z "$found_file" ]; then
-            echo "::error::No ${{ inputs.image_type }} files found"
-            exit 1
-          fi
+          echo "::error::No ${{ inputs.image_type }} files found"
+          exit 1
 
-          echo "Found file: $found_file"
-          7z a "../release/$output_file" "$found_file"
-          echo "output_file=$output_file" >> $GITHUB_OUTPUT
-
-      - name: Upload to Release
+      - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: release/${{ steps.locate.outputs.output_file }}
+          files: release/${{ steps.process.outputs.output_file }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cleanup
         if: always()
-        run: rm -rf extracted release
+        run: rm -rf extracted release firmware.zip
