@@ -67,16 +67,17 @@ jobs:
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
 
           case "${{ inputs.image_type }}" in
-            boot) patterns="boot.img"; partition="boot" ;;
-            recovery) patterns="recovery.img"; partition="recovery" ;;
-            modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partition="modem" ;;
-            vendor_boot) patterns="vendor_boot.img"; partition="vendor_boot" ;;
-            init_boot) patterns="init_boot.img"; partition="init_boot" ;;
-            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partition="preloader_raw" ;;
+            boot) patterns="boot.img"; partitions="boot" ;;
+            recovery) patterns="recovery.img"; partitions="recovery" ;;
+            modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partitions="modem md1img md1img.img md1img.bin NON-HLOS modem.img modem.bin" ;;
+            vendor_boot) patterns="vendor_boot.img"; partitions="vendor_boot" ;;
+            init_boot) patterns="init_boot.img"; partitions="init_boot" ;;
+            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partitions="preloader_raw" ;;
             *) echo "::error::Unsupported image_type: ${{ inputs.image_type }}" && exit 1 ;;
           esac
 
           found=false
+
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
@@ -87,8 +88,11 @@ jobs:
           done
 
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
-            echo "Trying to extract from payload.bin: $partition"
-            python3 ../tools/payload_dumper.py --images "$partition" payload.bin || true
+            echo "Trying to extract from payload.bin..."
+            for part in $partitions; do
+              echo "Trying partition: $part"
+              python3 ../tools/payload_dumper.py --images "$part" payload.bin && break
+            done
 
             for pattern in $patterns; do
               file=$(find . -iname "$pattern" | head -n 1)
