@@ -157,9 +157,10 @@ jobs:
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
-            --data "$data")
+            --data "$data" \
+            --data-urlencode "expiration_ttl=1800")
 
-          if ! echo "$response" | jq -e '.success == true' > /dev/null; then
+            if ! echo "$response" | jq -e '.success == true' > /dev/null; then
             echo "::error::KV güncelleme başarısız (failure): $response"
             exit 1
           fi
