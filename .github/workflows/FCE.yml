@@ -68,21 +68,21 @@ jobs:
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
           
           case "${{ inputs.image_type }}" in
-            boot) patterns="boot.img" ;;
-            recovery) patterns="recovery.img" ;;
-            modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img" ;;
-            system_ext) patterns="system_ext.img" ;;
-            vendor_boot) patterns="vendor_boot.img" ;;
-            init_boot) patterns="init_boot.img" ;;
+            boot) patterns="boot.img"; payload_partition="boot" ;;
+            recovery) patterns="recovery.img"; payload_partition="recovery" ;;
+            modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img"; payload_partition="modem" ;;
+            system_ext) patterns="system_ext.img"; payload_partition="system_ext" ;;
+            vendor_boot) patterns="vendor_boot.img"; payload_partition="vendor_boot" ;;
+            init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
           esac
           
-          # Search for image files
+          # Önce direk dosyayı ara
           found=false
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
               if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                # Special handling for system_ext to extract Settings.apk
+                # Settings.apk çıkarımı
                 sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
                 7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
                 (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
@@ -95,16 +95,17 @@ jobs:
             fi
           done
           
-          # Fallback: If image not found, try using payload.bin and payload_dumper
+          # Eğer dosya bulunamazsa ve payload.bin varsa, SADECE İSTENEN PARTITION'ı çıkar
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
-            echo "Using payload_dumper..."
-            python3 ../tools/payload_dumper.py payload.bin
+            echo "Sadece $payload_partition partition'ını çıkarıyorum..."
+            python3 ../tools/payload_dumper.py -p "$payload_partition" payload.bin
             
+            # Çıkarılan dosyayı bul ve sıkıştır
             for pattern in $patterns; do
               file=$(find . -iname "$pattern" | head -n 1)
               if [ -f "$file" ]; then
                 if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                  # Special handling for system_ext to extract Settings.apk
+                  # Settings.apk çıkarımı
                   sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
                   7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
                   (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
@@ -119,7 +120,7 @@ jobs:
           fi
           
           if [ "$found" = false ]; then
-            echo "::error::Could not find ${{ inputs.image_type }} image in the firmware"
+            echo "::error::İstenen ${{ inputs.image_type }} image dosyası firmware içinde bulunamadı"
             exit 1
           fi
           echo "file_name=$output_file" >> $GITHUB_OUTPUT
