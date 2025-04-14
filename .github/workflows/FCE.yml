@@ -43,8 +43,6 @@ jobs:
             brotli \
             python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
-          
-          # Install payload_dumper and erofs-utils
           git clone https://github.com/vm03/payload_dumper.git tools
           aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
           7z x erofs-utils.zip -otools
@@ -66,8 +64,6 @@ jobs:
         run: |
           cd extracted
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
-          
-          # Partition mapping
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img"; payload_partition="boot" ;;
             recovery) patterns="recovery.img"; payload_partition="recovery" ;;
@@ -76,8 +72,6 @@ jobs:
             vendor_boot) patterns="vendor_boot.img"; payload_partition="vendor_boot" ;;
             init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
           esac
-          
-          # Önce direkt dosya arama
           found=false
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
@@ -87,12 +81,8 @@ jobs:
               break
             fi
           done
-          
-          # Eğer dosya bulunamazsa ve payload.bin varsa
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
             echo "Sadece $payload_partition partition'ını çıkarıyorum..."
-            
-            # payload_dumper.py'yi doğru şekilde çağır
             if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
               for pattern in $patterns; do
                 file=$(find . -iname "$pattern" | head -n 1)
@@ -107,7 +97,6 @@ jobs:
               exit 1
             fi
           fi
-          
           if [ "$found" = false ]; then
             echo "::error::İstenen ${{ inputs.image_type }} image dosyası bulunamadı"
             exit 1
@@ -115,7 +104,6 @@ jobs:
           echo "file_name=$output_file" >> $GITHUB_OUTPUT
 
         env:
-          # System_ext işleme fonksiyonu
           handle_system_ext: |
             sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
             7z x "$1" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
@@ -135,29 +123,10 @@ jobs:
       - name: URL Encode KV Key
         id: urlencode
         run: |
-          # KV key format: "<image_type>:<firmware_name>"
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$key'''))")
           echo "encoded=$encoded" >> $GITHUB_OUTPUT
-          
-      - name: Validate Secrets
-        run: |
-         if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
-         echo "::error::Cloudflare API Token tanımlı değil!"
-         echo "Lütfen GitHub Repository Settings > Secrets bölümünden CF_API_TOKEN ekleyin"
-         exit 1
-         fi
-    
-         if [ -z "${{ secrets.CF_ACCOUNT_ID }}" ]; then
-         echo "::error::Cloudflare Account ID tanımlı değil!"
-         exit 1
-         fi
-    
-          if [ -z "${{ secrets.CF_NAMESPACE_ID }}" ]; then
-          echo "::error::Cloudflare Namespace ID tanımlı değil!"
-          exit 1
-         fi
-    
+
       - name: Update KV on Success
         if: success()
         run: |
@@ -173,35 +142,17 @@ jobs:
       - name: Update KV on Failure
         if: failure()
         run: |
-          # API yetkilendirmesini kontrol et
-          if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
-            echo "::error::Cloudflare API token bulunamadı!"
-            exit 1
-          fi
-
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          
-          # Hata detayını al
-          error_msg=$(sed -n '/::error::/ s/.*::error::\(.*\)/\1/p' "$GITHUB_STEP_SUMMARY" | tail -1 || echo "Extraction failed")
-          
+          error_msg="$(grep -oP '(?<=::error::).*' $GITHUB_STEP_SUMMARY | tail -1 || echo 'Extraction failed')"
           data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
-          
           echo "Updating KV record for key $key with value: $data"
-          
-          response=$(curl -sS -X PUT \
+          curl -sS -X PUT \
             "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            --data "$data")
-          
-          if ! echo "$response" | grep -q '"success":true'; then
-            echo "::error::KV güncelleme başarısız: $response"
-            # Fallback olarak GitHub'a hata yaz
-            echo "FAILED: $data" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-      
+            --data "$data"
+
       - name: Cleanup
         if: always()
         run: rm -rf extracted tools
