@@ -1,14 +1,11 @@
 export default {
   async fetch(request, env) {
     try {
-      // 1. URL ve parametre kontrolü
       const url = new URL(request.url);
       const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
       const firmwareUrl = url.searchParams.get('url');
-      // İsteğe ek track parametresi varsa alalım
       const incomingTrack = url.searchParams.get('track');
 
-      // 2. Parametre validasyonu
       if (!['boot', 'recovery', 'modem'].includes(imageType)) {
         return createResponse(400, { 
           error: 'Invalid type', 
@@ -22,12 +19,11 @@ export default {
         });
       }
       
-      // 3. URL normalizasyonu ve firmware adının belirlenmesi
       const cleanUrl = firmwareUrl.split('?')[0];
       const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
       const kvKey = `${imageType}:${firmwareName}`;
       
-      // 4. Eğer firmware hazırsa, asset kontrolü önce
+      // Önce, hazır asset kontrolü (dosya üretilmişse)
       const asset = await checkReleaseAsset(env.GTKK, imageType, firmwareName);
       if (asset) {
         return createResponse(200, {
@@ -37,29 +33,30 @@ export default {
         });
       }
       
-      // 5. KV’de saklı track_id kontrolü
+      // KV'de saklı track_id var mı kontrol edelim
       const savedTrack = await env.FCE_KV.get(kvKey);
-      if (incomingTrack && savedTrack && savedTrack === incomingTrack) {
-        // Eğer gelen track parametresi KV’dekiyle uyumlu ise, yeni workflow tetiklenmeden mevcut değeri döndür
-        return createResponse(200, {
-          status: 'processing',
-          tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
-          track_id: incomingTrack
-        });
-      }
-      
-      // KV’de hali hazırda bir track varsa, bunu döndür
       if (savedTrack) {
-        return createResponse(200, {
-          status: 'processing',
-          tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
-          track_id: savedTrack
-        });
+        if (await checkActiveRun(env.GTKK, savedTrack)) {
+          // Eğer aktif run varsa, mevcut track_id üzerinden "processing" yanıtı döndür.
+          return createResponse(200, {
+            status: 'processing',
+            tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
+            track_id: savedTrack
+          });
+        } else {
+          // Run artık aktif değil, yani workflow tamamlanmış (başarısız ya da başka bir sonuçla) demektir.
+          // Bu durumda KV kaydını temizleyip hata döndürüyoruz.
+          await env.FCE_KV.delete(kvKey);
+          return createResponse(500, {
+            error: 'Workflow failed',
+            message: 'Extraction process failed. Please retry.'
+          });
+        }
       }
       
-      // 6. Henüz track yoksa, yeni track oluştur ve workflow tetikle
+      // KV'de kayıt yoksa, yeni bir workflow tetikleyelim
       const trackId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 300 });
+      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 300 }); // TTL 5dk olarak ayarlanabilir
       
       const dispatchResp = await triggerWorkflow(env.GTKK, {
         url: cleanUrl,
@@ -94,7 +91,6 @@ export default {
   }
 };
 
-// GitHub Release kontrolü
 async function checkReleaseAsset(token, imageType, firmwareName) {
   try {
     const response = await fetch(
@@ -115,7 +111,31 @@ async function checkReleaseAsset(token, imageType, firmwareName) {
   }
 }
 
-// Yeni workflow tetiklemek için kullanacağımız fonksiyon
+async function checkActiveRun(token, trackId) {
+  try {
+    const response = await fetch(
+      'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?per_page=100',
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'FCE-Worker'
+        }
+      }
+    );
+    if (!response.ok) return false;
+    const { workflow_runs } = await response.json();
+    // Sadece 'in_progress' ve 'queued' durumlarını aktif olarak kabul ediyoruz.
+    return workflow_runs.some(run => {
+      const status = run.status;
+      return (status === 'in_progress' || status === 'queued') &&
+             run.inputs?.track === trackId;
+    });
+  } catch (e) {
+    console.error('Active run check error:', e);
+    return false;
+  }
+}
+
 async function triggerWorkflow(token, inputs) {
   return fetch(
     'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches',
