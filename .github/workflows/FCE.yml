@@ -45,22 +45,22 @@ jobs:
             python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
           git clone https://github.com/vm03/payload_dumper.git tools
-          aria2c -x 8 -s 8 -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
           7z x erofs-utils.zip -otools
           pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
           rm -f erofs-utils.zip
 
       - name: Download firmware
         run: |
-          aria2c -x 8 -s 8 --continue --out=firmware.zip "${{ inputs.url }}" || exit 1
+          aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" || exit 1
           [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
-      - name: Extract files
+      - name: Extract firmware
         run: |
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
 
-      - name: Find and package image
+      - name: Find and extract image
         id: process
         run: |
           cd extracted
@@ -91,7 +91,10 @@ jobs:
             echo "Trying to extract from payload.bin..."
             for part in $partitions; do
               echo "Trying partition: $part"
-              python3 ../tools/payload_dumper.py --images "$part" payload.bin && break
+              if python3 ../tools/payload_dumper.py --images "$part" payload.bin; then
+                echo "✅ Successfully extracted: $part"
+                break
+              fi
             done
 
             for pattern in $patterns; do
