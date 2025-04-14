@@ -20,54 +20,25 @@ env:
   RETRY_DELAY: 10
 
 jobs:
-  check_duplicate:
-    name: Check for Duplicate Runs
-    runs-on: ubuntu-latest
-    outputs:
-      should_continue: ${{ steps.check_duplicate.outputs.should_continue }}
-    steps:
-      - name: Check for existing runs
-        id: check_duplicate
-        run: |
-          # GitHub API ile aynı firmware için aktif run kontrolü
-          response=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs?status=in_progress")
-          
-          # jq ile aynı URL ve image_type için aktif run var mı kontrol et
-          duplicate_exists=$(echo "$response" | jq --arg url "${{ inputs.url }}" \
-            --arg type "${{ inputs.image_type }}" \
-            '.workflow_runs[] | select(.inputs.url == $url and .inputs.image_type == $type) | .id' | wc -l)
-          
-          if [ "$duplicate_exists" -gt 0 ]; then
-            echo "::warning::Duplicate run detected for ${{ inputs.image_type }} image"
-            echo "should_continue=false" >> $GITHUB_OUTPUT
-          else
-            echo "should_continue=true" >> $GITHUB_OUTPUT
-          fi
-
   extract:
     name: Extract ${{ inputs.image_type }}
-    needs: check_duplicate
-    if: needs.check_duplicate.outputs.should_continue == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
       - name: Validate Inputs
         run: |
+          echo "Starting processing for Track ID: ${{ inputs.track }}"
           if [[ ! "${{ inputs.url }}" =~ \.zip($|\?) ]]; then
             echo "::error::Invalid URL pattern"
             exit 1
           fi
           echo "Processing ${{ inputs.image_type }} image from ${{ inputs.url }}"
-          echo "Track ID: ${{ inputs.track || 'N/A' }}"
 
       - uses: actions/checkout@v4
 
       - name: Setup Environment
         run: |
-          # Gerekli paketleri kur
           sudo apt-get update -qq
           sudo apt-get install -y \
             android-sdk-libsparse-utils \
@@ -78,15 +49,12 @@ jobs:
             jq \
             curl
 
-          # simg2img için sembolik link
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
 
-          # Payload dumper kurulumu
           if [ ! -d "tools" ]; then
             git clone https://github.com/vm03/payload_dumper.git tools
           fi
 
-          # Python bağımlılıkları
           pip install -q protobuf pyelftools
           echo "Environment setup completed"
 
@@ -129,7 +97,6 @@ jobs:
             ["modem"]="NON-HLOS.bin md1img.img modem.bin modem.img"
           )
 
-          # Tüm dizinlerde arama
           found_file=""
           for path in $SEARCH_PATHS; do
             [ ! -d "$path" ] && continue
@@ -144,7 +111,6 @@ jobs:
             done
           done
 
-          # Payload.bin fallback
           if [ -z "$found_file" ] && [ -f "payload.bin" ]; then
             echo "Extracting from payload.bin..."
             python3 ../tools/payload_dumper.py --out . --images "${{ inputs.image_type }}"* payload.bin
@@ -160,12 +126,11 @@ jobs:
           fi
 
           if [ -z "$found_file" ]; then
-            echo "::error::No ${{ inputs.image_type }} files found in: ${file_patterns[${{ inputs.image_type }}]}"
+            echo "::error::No ${{ inputs.image_type }} files found"
             exit 1
           fi
 
           echo "output_file=$output_file" >> $GITHUB_OUTPUT
-          echo "Processed $found_file successfully"
 
       - name: Upload Release
         uses: softprops/action-gh-release@v1
@@ -181,17 +146,8 @@ jobs:
         if: always()
         run: |
           rm -rf extracted release
-          echo "Cleanup completed"
 
-      - name: Update KV Store
+      - name: Update KV Store (Optional)
         if: success()
         run: |
-          # Cloudflare KV'yi güncellemek için ek API çağrısı
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/storage/kv/namespaces/$KV_NAMESPACE_ID/values/${{ inputs.image_type }}:${{ inputs.track }}" \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"status":"completed"}'
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          echo "KV update skipped in simplified version"
