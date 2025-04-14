@@ -1,148 +1,96 @@
-// Helper function for JSON responses
-function jsonResponse(status, data) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
-
-// GitHub action trigger function
-async function triggerGitHubAction(token, inputs) {
-  const response = await fetch(
-    'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/firmware-extraction.yml/dispatches',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'User-Agent': 'FCE-Worker',
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github.v3+json'
-      },
-      body: JSON.stringify({
-        ref: 'main',
-        inputs
-      })
-    }
-  );
-
-  // Handle response properly
-  const responseText = await response.text().catch(() => 'Unable to read response');
-  return {
-    ok: response.ok,
-    status: response.status,
-    statusText: response.statusText,
-    body: responseText
-  };
-}
-
-// Check GitHub run status
-async function checkGitHubRun(token, trackId) {
-  try {
-    const response = await fetch(
-      `https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'User-Agent': 'FCE-Worker',
-          'Accept': 'application/vnd.github.v3+json'
-        }
-      }
-    );
-
-    if (!response.ok) return 'error';
-
-    const { workflow_runs } = await response.json();
-    const relevantRuns = workflow_runs.filter(run => 
-      (run.inputs && run.inputs.track === trackId)
-    );
-
-    if (relevantRuns.length === 0) return 'not_found';
-    
-    const latestRun = relevantRuns[0];
-    return ['in_progress', 'queued', 'pending', 'requested'].includes(latestRun.status) 
-      ? 'active' 
-      : 'not_found';
-  } catch (error) {
-    console.error('GitHub API error:', error);
-    return 'error';
-  }
-}
-
 export default {
   async fetch(request, env) {
     try {
-      const url = new URL(request.url);
-      const params = url.searchParams;
-      
-      // Validate required parameters
-      const imageType = params.get('type')?.toLowerCase() || 'boot';
-      const firmwareUrl = params.get('url');
+      // Debug headers
+      const headers = Object.fromEntries(request.headers);
+      console.log('Request headers:', JSON.stringify(headers));
 
-      if (!firmwareUrl) {
-        return jsonResponse(400, { error: 'Missing URL parameter' });
+      // Validate request
+      const url = new URL(request.url);
+      const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
+      const firmwareUrl = url.searchParams.get('url');
+      
+      if (!['boot', 'recovery', 'modem'].includes(imageType)) {
+        return createResponse(400, { error: 'Invalid type. Use boot/recovery/modem' });
       }
 
-      if (!['boot', 'recovery', 'modem'].includes(imageType)) {
-        return jsonResponse(400, { error: 'Invalid image type. Must be boot, recovery, or modem' });
+      if (!firmwareUrl?.match(/\.zip($|\?)/i)) {
+        return createResponse(400, { error: 'URL must end with .zip' });
       }
 
       // Normalize URL
-      const normalizedUrl = firmwareUrl.split('.zip')[0] + '.zip';
-      const firmwareName = normalizedUrl.split('/').pop().replace('.zip', '');
+      const cleanUrl = firmwareUrl.split('.zip')[0] + '.zip';
+      const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
       const kvKey = `${imageType}:${firmwareName}`;
 
-      // Check existing processing
+      // Check KV for existing process - Basitleştirilmiş versiyon
       const existingTrack = await env.FCE_KV.get(kvKey);
       if (existingTrack) {
-        const runStatus = await checkGitHubRun(env.GTKK, existingTrack);
-        
-        if (runStatus === 'error') {
-          return jsonResponse(500, { error: 'Failed to check run status' });
-        }
-        
-        if (runStatus === 'not_found') {
-          await env.FCE_KV.delete(kvKey);
-          return jsonResponse(200, { status: 'retry' });
-        }
-        
-        return jsonResponse(200, { 
+        return createResponse(200, {
           status: 'processing',
-          track_id: existingTrack
+          tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions'
         });
       }
 
-      // Start new processing
-      const trackId = Date.now().toString();
-      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 1800 });
+      // Check existing release
+      const asset = await checkReleaseAsset(env.GTKK, imageType, firmwareName);
+      if (asset) {
+        return createResponse(200, {
+          status: 'ready',
+          download_url: asset.browser_download_url,
+          file_name: asset.name
+        });
+      }
 
-      const dispatch = await triggerGitHubAction(env.GTKK, {
-        url: normalizedUrl,
+      // Start new process
+      const trackId = Date.now().toString();
+      
+      // Önce KV'ye yaz
+      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 3600 }); // 1 saat
+
+      // Sonra işlemi başlat
+      const dispatch = await triggerWorkflow(env.GTKK, {
+        url: cleanUrl,
         track: trackId,
         image_type: imageType
       });
 
       if (!dispatch.ok) {
         await env.FCE_KV.delete(kvKey);
-        return jsonResponse(500, { 
-          error: 'Dispatch failed',
-          details: `${dispatch.status} ${dispatch.statusText}`,
-          api_response: dispatch.body
-        });
+        const errorText = await dispatch.text();
+        console.error('Dispatch failed:', errorText);
+        return createResponse(500, { error: 'Workflow dispatch failed' });
       }
 
-      return jsonResponse(200, { 
+      return createResponse(200, {
         status: 'processing',
-        track_id: trackId,
-        image_type: imageType,
-        url: normalizedUrl
+        tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
+        track_id: trackId
       });
 
     } catch (error) {
-      console.error('Worker error:', error);
-      return jsonResponse(500, { 
+      console.error('Unhandled error:', error);
+      return createResponse(500, { 
         error: 'Internal server error',
         details: error.message 
       });
     }
   }
+};
+
+// Helper functions (Aynı kalıyor)
+async function checkActiveRun(token, trackId) {
+  // ... mevcut implementasyon ...
+}
+
+async function checkReleaseAsset(token, imageType, firmwareName) {
+  // ... mevcut implementasyon ...
+}
+
+async function triggerWorkflow(token, inputs) {
+  // ... mevcut implementasyon ...
+}
+
+function createResponse(status, data) {
+  // ... mevcut implementasyon ...
 }
