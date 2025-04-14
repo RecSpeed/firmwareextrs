@@ -155,14 +155,34 @@ jobs:
       - name: Update KV on Failure
         if: failure()
         run: |
+          # API yetkilendirmesini kontrol et
+          if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
+            echo "::error::Cloudflare API token bulunamadı!"
+            exit 1
+          fi
+
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"Extraction process failed - see workflow logs\"}"
-          echo "Updating KV record for key $key with value $data"
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+          
+          # Hata detayını al
+          error_msg=$(sed -n '/::error::/ s/.*::error::\(.*\)/\1/p' "$GITHUB_STEP_SUMMARY" | tail -1 || echo "Extraction failed")
+          
+          data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
+          
+          echo "Updating KV record for key $key with value: $data"
+          
+          response=$(curl -sS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            --data "$data"
+            --data "$data")
+          
+          if ! echo "$response" | grep -q '"success":true'; then
+            echo "::error::KV güncelleme başarısız: $response"
+            # Fallback olarak GitHub'a hata yaz
+            echo "FAILED: $data" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
       
       - name: Cleanup
         if: always()
