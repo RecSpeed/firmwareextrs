@@ -41,6 +41,7 @@ jobs:
             p7zip-full \
             aria2 \
             brotli \
+            jq \
             python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
           git clone https://github.com/vm03/payload_dumper.git tools
@@ -139,13 +140,14 @@ jobs:
           file="${{ steps.process.outputs.file_name }}"
           data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"$file\"}"
           echo "Updating KV (success): $data"
+
           response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
             --data "$data")
 
-          if [[ "$response" != *'"success":true'* ]]; then
+          if ! echo "$response" | jq -e '.success == true' > /dev/null; then
             echo "::error::KV güncelleme başarısız (success): $response"
             exit 1
           fi
@@ -158,13 +160,14 @@ jobs:
           error_msg=$(grep "::error::" "$GITHUB_STEP_SUMMARY" | sed -n 's/.*::error:://p' | tail -1 || echo "Unknown failure")
           data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
           echo "Updating KV (failure): $data"
+
           response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
             --data "$data")
 
-          if [[ "$response" != *'"success":true'* ]]; then
+          if ! echo "$response" | jq -e '.success == true' > /dev/null; then
             echo "::error::KV güncelleme başarısız (failure): $response"
             exit 1
           fi
