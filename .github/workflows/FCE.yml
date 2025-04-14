@@ -6,6 +6,9 @@ on:
       url:
         required: true
         description: 'Firmware ZIP URL'
+      firmware_name:
+        required: true
+        description: 'Firmware base name (dosya adı, .zip uzantısı olmadan)'
       track:
         required: false
         description: 'Tracking ID'
@@ -15,7 +18,7 @@ on:
         description: 'boot/recovery/modem'
 
 concurrency:
-  group: extract-${{ inputs.image_type }}-${{ github.run_id }}
+  group: extract-${{ inputs.image_type }}-${{ inputs.firmware_name }}
   cancel-in-progress: true
 
 jobs:
@@ -27,6 +30,7 @@ jobs:
       - name: Check inputs
         run: |
           echo "Processing ${{ inputs.image_type }} from ${{ inputs.url }}"
+          echo "Firmware Name: ${{ inputs.firmware_name }}"
           echo "Track ID: ${{ inputs.track || 'None' }}"
 
       - name: Setup environment
@@ -53,7 +57,7 @@ jobs:
         id: process
         run: |
           cd extracted
-          output_file="${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip).zip"
+          output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
           
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img" ;;
