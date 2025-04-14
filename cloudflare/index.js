@@ -5,94 +5,103 @@ export default {
       const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
       const firmwareUrl = url.searchParams.get('url');
 
-      if (!['boot', 'recovery', 'modem', 'preloader'].includes(imageType)) {
-        return createResponse(400, { 
-          error: 'Invalid type', 
-          valid_types: ['boot', 'recovery', 'modem', 'preloader']
+      if (!['boot', 'modem', 'preloader'].includes(imageType)) {
+        return createResponse(400, {
+          error: 'Invalid type',
+          valid_types: ['boot', 'modem', 'preloader']
         });
       }
       if (!firmwareUrl || !firmwareUrl.match(/^https?:\/\/.+\..+\.zip($|\?)/i)) {
-        return createResponse(400, { 
+        return createResponse(400, {
           error: 'Invalid URL format',
           example: 'https://example.com/firmware.zip'
         });
       }
-      
+
       const cleanUrl = firmwareUrl.split('?')[0];
       const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
-      // KV anahtarı: imageType ve firmware adını birlikte kullanıyoruz
       const kvKey = `${imageType}:${firmwareName}`;
-      
-      // İlk olarak, releasede dosya hazır mı kontrol edelim
+
       const asset = await checkReleaseAsset(env.GTKK, imageType, firmwareName);
       if (asset) {
+        const record = {
+          state: "complete",
+          timestamp: new Date().toISOString(),
+          error: null,
+          file: asset.browser_download_url
+        };
+        await env.FCE_KV.put(kvKey, JSON.stringify(record), { expirationTtl: 3600 });
         return createResponse(200, {
           status: 'ready',
           download_url: asset.browser_download_url,
           file_name: asset.name
         });
       }
-      
-      // KV'de bu firmware için bir kayıt var mı?
+
       const kvValue = await env.FCE_KV.get(kvKey);
       if (kvValue) {
-        // KV değerini parse edip mevcut durumu kontrol edelim
         try {
           const record = JSON.parse(kvValue);
-          // Eğer mevcut kayıt "processing" ya da "failed" durumunda ise,
-          // aynı firmware için yeni işlem başlatılmasına gerek yok.
-          if (record.state === "processing") {
+          const age = (Date.now() - new Date(record.timestamp).getTime()) / 1000;
+
+          if (record.state === "failed" && age <= 3600) {
+            return createResponse(500, {
+              status: "error",
+              error: "Workflow failed",
+              message: record.error || "Extraction process failed. Please retry.",
+              tracking_url: record.tracking_url || "https://github.com/RecSpeed/firmwareextrs/actions",
+              track_id: kvKey
+            });
+          } else if (record.state === "processing" && age <= 300) {
             return createResponse(200, {
               status: "processing",
               tracking_url: "https://github.com/RecSpeed/firmwareextrs/actions",
-              track_id: kvKey  // KV anahtarını track_id olarak kullanıyoruz
-            });
-          } else if (record.state === "failed") {
-            return createResponse(500, {
-              error: "Workflow failed",
-              message: record.error || "Extraction process failed. Please retry."
+              track_id: kvKey
             });
           }
         } catch (e) {
-          // Parse edilemezse, kaydı yokmuş gibi davranıp yeni işlem başlatabilirsiniz.
+          console.warn("KV record parse failed, continuing...");
         }
       }
-      
-      // KV kaydı yoksa; yani bu firmware için işlem henüz başlamamış
-      // KV'ye "processing" durumunu yazıyoruz. TTL 5 dakika (300 saniye) olarak ayarlanıyor.
-      const newRecord = { state: "processing", timestamp: new Date().toISOString(), error: null };
+
+      const newRecord = {
+        state: "processing",
+        timestamp: new Date().toISOString(),
+        error: null
+      };
       await env.FCE_KV.put(kvKey, JSON.stringify(newRecord), { expirationTtl: 300 });
-      
-      // Yeni workflow tetikleme: Yeni işlem başlatılıyor.
+
       const dispatchResp = await triggerWorkflow(env.GTKK, {
         url: cleanUrl,
-        // track olarak KV key'ini (örn. imageType:firmwareName) gönderiyoruz,
-        // böylece workflow bu kaydı güncelleyebilir.
         track: kvKey,
         image_type: imageType,
         firmware_name: firmwareName
       });
-      
+
       if (!dispatchResp.ok) {
-        // Eğer dispatch başarısız olursa, KV kaydını silebilir veya güncelleyebilirsiniz.
-        await env.FCE_KV.delete(kvKey);
+        await env.FCE_KV.put(kvKey, JSON.stringify({
+          state: "failed",
+          timestamp: new Date().toISOString(),
+          error: "Dispatch failed",
+          tracking_url: "https://github.com/RecSpeed/firmwareextrs/actions"
+        }), { expirationTtl: 3600 });
+
         const error = await dispatchResp.text();
-        console.error('Dispatch failed:', error);
-        return createResponse(500, { 
+        return createResponse(500, {
           error: 'Workflow dispatch failed',
           details: error.slice(0, 200)
         });
       }
-      
+
       return createResponse(200, {
         status: 'processing',
         tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
         track_id: kvKey
       });
-      
+
     } catch (error) {
       console.error('Unhandled error:', error);
-      return createResponse(500, { 
+      return createResponse(500, {
         error: 'Internal server error',
         request_id: request.headers.get('cf-ray')
       });
