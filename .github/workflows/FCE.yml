@@ -147,7 +147,8 @@ jobs:
           data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"$file\"}"
           echo "Updating KV: $data"
           response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
+            -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
             --data "$data")
 
@@ -165,7 +166,8 @@ jobs:
           data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
           echo "Updating KV (failure): $data"
           response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
+            -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
             --data "$data")
 
