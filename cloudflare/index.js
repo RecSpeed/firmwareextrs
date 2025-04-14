@@ -5,10 +5,10 @@ export default {
       const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
       const firmwareUrl = url.searchParams.get('url');
 
-      if (!['boot', 'recovery', 'modem'].includes(imageType)) {
+      if (!['boot', 'recovery', 'modem', 'preloader'].includes(imageType)) {
         return createResponse(400, { 
           error: 'Invalid type', 
-          valid_types: ['boot', 'recovery', 'modem']
+          valid_types: ['boot', 'recovery', 'modem', 'preloader']
         });
       }
       if (!firmwareUrl || !firmwareUrl.match(/^https?:\/\/.+\..+\.zip($|\?)/i)) {
