@@ -52,7 +52,7 @@ jobs:
       - name: Download firmware
         run: |
           aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" || exit 1
-          [ -f firmware.zip ] || (echo "Download failed" && exit 1)
+          [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
       - name: Extract files
         run: |
@@ -64,6 +64,7 @@ jobs:
         run: |
           cd extracted
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
+
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img"; payload_partition="boot" ;;
             recovery) patterns="recovery.img"; payload_partition="recovery" ;;
@@ -72,44 +73,56 @@ jobs:
             vendor_boot) patterns="vendor_boot.img"; payload_partition="vendor_boot" ;;
             init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
           esac
+
           found=false
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
-              [ "${{ inputs.image_type }}" = "system_ext" ] && handle_system_ext "$file" || 7z a "../$output_file" "$file"
+              if [ "${{ inputs.image_type }}" = "system_ext" ]; then
+                sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
+                7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . || \
+                (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk .) || \
+                (echo "::error::Settings.apk extraction failed" && exit 1)
+                7z a "../$output_file" Settings.apk
+              else
+                7z a "../$output_file" "$file"
+              fi
               found=true
               break
             fi
           done
+
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
-            echo "Sadece $payload_partition partition'ını çıkarıyorum..."
+            echo "Using payload_dumper for $payload_partition"
             if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
               for pattern in $patterns; do
                 file=$(find . -iname "$pattern" | head -n 1)
                 if [ -f "$file" ]; then
-                  [ "${{ inputs.image_type }}" = "system_ext" ] && handle_system_ext "$file" || 7z a "../$output_file" "$file"
+                  if [ "${{ inputs.image_type }}" = "system_ext" ]; then
+                    sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
+                    7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . || \
+                    (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk .) || \
+                    (echo "::error::Settings.apk extraction failed" && exit 1)
+                    7z a "../$output_file" Settings.apk
+                  else
+                    7z a "../$output_file" "$file"
+                  fi
                   found=true
                   break
                 fi
               done
             else
-              echo "::error::Payload dumper failed to extract $payload_partition"
+              echo "::error::payload_dumper.py failed"
               exit 1
             fi
           fi
+
           if [ "$found" = false ]; then
-            echo "::error::İstenen ${{ inputs.image_type }} image dosyası bulunamadı"
+            echo "::error::Target image not found"
             exit 1
           fi
-          echo "file_name=$output_file" >> $GITHUB_OUTPUT
 
-        env:
-          handle_system_ext: |
-            sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-            7z x "$1" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
-            (../tools/extract.erofs -i "$1" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || \
-            (echo "both methods failed" && exit 1))
-            7z a "../$output_file" Settings.apk
+          echo "file_name=$output_file" >> $GITHUB_OUTPUT
 
       - name: Upload release
         if: success()
@@ -132,8 +145,9 @@ jobs:
         run: |
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"${{ steps.process.outputs.file_name }}\"}"
-          echo "Updating KV record for key $key with value $data"
+          file="${{ steps.process.outputs.file_name }}"
+          data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"$file\"}"
+          echo "Updating KV: $data"
           curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -H "Content-Type: application/json" \
@@ -144,11 +158,10 @@ jobs:
         run: |
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          error_msg="$(grep -oP '(?<=::error::).*' $GITHUB_STEP_SUMMARY | tail -1 || echo 'Extraction failed')"
+          error_msg=$(grep "::error::" $GITHUB_STEP_SUMMARY | sed -n 's/.*::error:://p' | tail -1 || echo "Unknown failure")
           data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
-          echo "Updating KV record for key $key with value: $data"
-          curl -sS -X PUT \
-            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+          echo "Updating KV (failure): $data"
+          curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             --data "$data"
