@@ -15,7 +15,7 @@ on:
       image_type:
         required: true
         default: 'boot'
-        description: 'boot/recovery/modem/system_ext'
+        description: 'boot/recovery/modem/system_ext/preloader'
 
 concurrency:
   group: extract-${{ inputs.image_type }}-${{ inputs.firmware_name }}
@@ -60,27 +60,20 @@ jobs:
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
 
-      - name: List extracted files
-        run: |
-          echo "📂 Listing extracted files:"
-          find extracted/ -type f | sort
-
       - name: Find and package image
         id: process
         run: |
           cd extracted
-          echo "📂 Listing current directory contents:"
-          find . -type f | sort
-
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
 
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img"; payload_partition="boot" ;;
             recovery) patterns="recovery.img"; payload_partition="recovery" ;;
-            modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img"; payload_partition="modem" ;;
+            modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; payload_partition="modem" ;;
             system_ext) patterns="system_ext.img"; payload_partition="system_ext" ;;
             vendor_boot) patterns="vendor_boot.img"; payload_partition="vendor_boot" ;;
             init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
+            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; payload_partition="" ;;
           esac
 
           found=false
@@ -101,12 +94,9 @@ jobs:
             fi
           done
 
-          if [ "$found" = false ] && [ -f "payload.bin" ]; then
+          if [ "$found" = false ] && [ -f "payload.bin" ] && [ -n "$payload_partition" ]; then
             echo "Using payload_dumper for $payload_partition"
             if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
-              echo "📂 Listing payload_dumper output:"
-              find . -type f | sort
-
               for pattern in $patterns; do
                 file=$(find . -iname "$pattern" | head -n 1)
                 if [ -f "$file" ]; then
