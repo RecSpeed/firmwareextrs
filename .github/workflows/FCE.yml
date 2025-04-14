@@ -30,13 +30,22 @@ jobs:
       - name: Setup environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y android-sdk-libsparse-utils p7zip-full aria2 brotli jq python3-pip
+          sudo apt-get install -y \
+            android-sdk-libsparse-utils \
+            p7zip-full \
+            aria2 \
+            brotli \
+            jq \
+            python3-pip
+
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
-          git clone https://github.com/vm03/payload_dumper.git tools
-          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+
+          git clone --depth=1 https://github.com/vm03/payload_dumper.git tools
+          aria2c -x 8 -s 8 -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
           7z x erofs-utils.zip -otools
-          pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
           rm -f erofs-utils.zip
+
+          pip install --no-cache-dir -r ./tools/requirements.txt
 
       - name: Download firmware
         run: |
