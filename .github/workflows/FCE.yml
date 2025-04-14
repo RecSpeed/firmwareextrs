@@ -72,7 +72,7 @@ jobs:
             modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partition="modem" ;;
             vendor_boot) patterns="vendor_boot.img"; partition="vendor_boot" ;;
             init_boot) patterns="init_boot.img"; partition="init_boot" ;;
-            preloader) patterns="preloader_raw.img"; partition="preloader" ;;
+            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partition="preloader_raw" ;;
             *) echo "::error::Unsupported image_type: ${{ inputs.image_type }}" && exit 1 ;;
           esac
 
