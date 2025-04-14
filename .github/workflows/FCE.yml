@@ -27,22 +27,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Check inputs
-        run: |
-          echo "Processing ${{ inputs.image_type }} from ${{ inputs.url }}"
-          echo "Firmware Name: ${{ inputs.firmware_name }}"
-          echo "Track ID: ${{ inputs.track || 'None' }}"
-
       - name: Setup environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            android-sdk-libsparse-utils \
-            p7zip-full \
-            aria2 \
-            brotli \
-            jq \
-            python3-pip
+          sudo apt-get install -y android-sdk-libsparse-utils p7zip-full aria2 brotli jq python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
           git clone https://github.com/vm03/payload_dumper.git tools
           aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
@@ -52,15 +40,15 @@ jobs:
 
       - name: Download firmware
         run: |
-          aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" || exit 1
+          aria2c -x 8 -s 8 -k 1M --continue --out=firmware.zip "${{ inputs.url }}"
           [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
-      - name: Extract firmware
+      - name: Extract ZIP contents
         run: |
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
 
-      - name: Find and extract image
+      - name: Find and package image
         id: process
         run: |
           cd extracted
@@ -78,31 +66,37 @@ jobs:
 
           found=false
 
+          echo "🔍 Searching inside extracted ZIP for patterns..."
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
+              echo "✅ Found in ZIP: $file"
               7z a "../$output_file" "$file"
               found=true
               break
+            else
+              echo "❌ Not in ZIP: $pattern"
             fi
           done
 
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
-            echo "Trying to extract from payload.bin..."
+            echo "📦 payload.bin detected, trying partition extraction..."
             for part in $partitions; do
-              echo "Trying partition: $part"
+              echo "➡️ Trying partition: $part"
               if python3 ../tools/payload_dumper.py --images "$part" payload.bin; then
-                echo "✅ Successfully extracted: $part"
-                break
-              fi
-            done
-
-            for pattern in $patterns; do
-              file=$(find . -iname "$pattern" | head -n 1)
-              if [ -f "$file" ]; then
-                7z a "../$output_file" "$file"
-                found=true
-                break
+                for pattern in $patterns; do
+                  file=$(find . -iname "$pattern" | head -n 1)
+                  if [ -f "$file" ]; then
+                    echo "✅ Found after extracting $part: $file"
+                    7z a "../$output_file" "$file"
+                    found=true
+                    break 2
+                  else
+                    echo "❌ $pattern not found after extracting $part"
+                  fi
+                done
+              else
+                echo "⚠️ Partition $part not found in payload.bin"
               fi
             done
           fi
