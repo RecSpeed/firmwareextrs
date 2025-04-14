@@ -48,7 +48,7 @@ jobs:
           git clone https://github.com/vm03/payload_dumper.git tools
           aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
           7z x erofs-utils.zip -otools
-          pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==3.4.8
+          pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
           rm -f erofs-utils.zip
 
       - name: Download firmware
@@ -118,7 +118,10 @@ jobs:
             done
           fi
           
-          [ "$found" = false ] && exit 1
+          if [ "$found" = false ]; then
+            echo "::error::Could not find ${{ inputs.image_type }} image in the firmware"
+            exit 1
+          fi
           echo "file_name=$output_file" >> $GITHUB_OUTPUT
 
       - name: Upload release
@@ -136,7 +139,7 @@ jobs:
           # KV key format: "<image_type>:<firmware_name>"
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$key'''))")
-          echo "::set-output name=encoded::$encoded"
+          echo "encoded=$encoded" >> $GITHUB_OUTPUT
 
       - name: Update KV on Success
         if: success()
@@ -155,7 +158,7 @@ jobs:
         run: |
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"Extraction process failed.\"}"
+          data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"Extraction process failed - see workflow logs\"}"
           echo "Updating KV record for key $key with value $data"
           curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
