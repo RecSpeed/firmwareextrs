@@ -38,11 +38,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y android-sdk-libsparse-utils p7zip-full aria2 brotli python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
-          mkdir tools
-          curl -L -o pdgo.tar.gz https://github.com/vm03/payload-dumper-go/releases/download/v1.0.0/payload-dumper-go_1.0.0_linux_amd64.tar.gz
-          tar -xzf pdgo.tar.gz -C tools
-          chmod +x tools/payload-dumper-go
-          rm -f pdgo.tar.gz
+          git clone https://github.com/vm03/payload_dumper.git tools
+          pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
 
       - name: Download firmware
         run: |
@@ -66,7 +63,7 @@ jobs:
             modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partition="modem" ;;
             vendor_boot) patterns="vendor_boot.img"; partition="vendor_boot" ;;
             init_boot) patterns="init_boot.img"; partition="init_boot" ;;
-            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partition="";;
+            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partition="" ;;
             *) echo "::error::Unsupported image_type"; exit 1 ;;
           esac
 
@@ -81,8 +78,8 @@ jobs:
           done
 
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
-            echo "Extracting all images from payload.bin..."
-            ../tools/payload-dumper-go -i payload.bin -o . || true
+            echo "Extracting from payload.bin..."
+            python3 ../tools/payload_dumper.py --images "$partition" payload.bin || true
 
             for pattern in $patterns; do
               file=$(find . -iname "$pattern" | head -n 1)
