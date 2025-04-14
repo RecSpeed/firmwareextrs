@@ -67,6 +67,7 @@ jobs:
           cd extracted
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
           
+          # Partition mapping
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img"; payload_partition="boot" ;;
             recovery) patterns="recovery.img"; payload_partition="recovery" ;;
@@ -76,54 +77,51 @@ jobs:
             init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
           esac
           
-          # Önce direk dosyayı ara
+          # Önce direkt dosya arama
           found=false
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
-              if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                # Settings.apk çıkarımı
-                sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-                7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
-                (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
-                7z a "../$output_file" Settings.apk
-              else
-                7z a "../$output_file" "$file"
-              fi
+              [ "${{ inputs.image_type }}" = "system_ext" ] && handle_system_ext "$file" || 7z a "../$output_file" "$file"
               found=true
               break
             fi
           done
           
-          # Eğer dosya bulunamazsa ve payload.bin varsa, SADECE İSTENEN PARTITION'ı çıkar
+          # Eğer dosya bulunamazsa ve payload.bin varsa
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
             echo "Sadece $payload_partition partition'ını çıkarıyorum..."
-            python3 ../tools/payload_dumper.py -p "$payload_partition" payload.bin
             
-            # Çıkarılan dosyayı bul ve sıkıştır
-            for pattern in $patterns; do
-              file=$(find . -iname "$pattern" | head -n 1)
-              if [ -f "$file" ]; then
-                if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                  # Settings.apk çıkarımı
-                  sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-                  7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
-                  (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
-                  7z a "../$output_file" Settings.apk
-                else
-                  7z a "../$output_file" "$file"
+            # payload_dumper.py'yi doğru şekilde çağır
+            if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
+              for pattern in $patterns; do
+                file=$(find . -iname "$pattern" | head -n 1)
+                if [ -f "$file" ]; then
+                  [ "${{ inputs.image_type }}" = "system_ext" ] && handle_system_ext "$file" || 7z a "../$output_file" "$file"
+                  found=true
+                  break
                 fi
-                found=true
-                break
-              fi
-            done
+              done
+            else
+              echo "::error::Payload dumper failed to extract $payload_partition"
+              exit 1
+            fi
           fi
           
           if [ "$found" = false ]; then
-            echo "::error::İstenen ${{ inputs.image_type }} image dosyası firmware içinde bulunamadı"
+            echo "::error::İstenen ${{ inputs.image_type }} image dosyası bulunamadı"
             exit 1
           fi
           echo "file_name=$output_file" >> $GITHUB_OUTPUT
+
+        env:
+          # System_ext işleme fonksiyonu
+          handle_system_ext: |
+            sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
+            7z x "$1" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
+            (../tools/extract.erofs -i "$1" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || \
+            (echo "both methods failed" && exit 1))
+            7z a "../$output_file" Settings.apk
 
       - name: Upload release
         if: success()
