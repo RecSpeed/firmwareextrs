@@ -1,4 +1,4 @@
-name: Firmware Extraction
+name: 🔧 Firmware Extraction
 
 on:
   workflow_dispatch:
@@ -11,73 +11,67 @@ on:
         type: string
       image_type:
         required: true
+        type: string
         default: 'boot'
-        type: choice
-        options: ['boot', 'recovery', 'modem']
 
-concurrency:
-  group: extract-${{ inputs.image_type }}-${{ hash(inputs.url) }}
-  cancel-in-progress: true
+permissions:
+  contents: write
+  actions: read
 
 jobs:
   extract:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Setup
+      - name: 🔍 Girişleri kontrol et
+        run: |
+          echo "📥 URL: ${{ inputs.url }}"
+          echo "🔧 Tip: ${{ inputs.image_type }}"
+          echo "🆔 Track ID: ${{ inputs.track || 'Yok' }}"
+
+      - name: 🛠️ Gerekenleri kur
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             android-sdk-libsparse-utils \
             p7zip-full \
             aria2 \
-            brotli \
-            jq
+            brotli
 
-      - name: Download
+      - name: ⬇️ Firmware indir
         run: |
-          aria2c -x 8 -s 8 -o firmware.zip "${{ inputs.url }}" || exit 1
-          [ -f firmware.zip ] || (echo "Download failed" && exit 1)
+          aria2c -x 8 -s 8 -o firmware.zip "${{ inputs.url }}"
+          [ -f firmware.zip ] || (echo "❌ İndirme başarısız" && exit 1)
 
-      - name: Extract
+      - name: 📦 Dosyaları çıkar
         run: |
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
 
-      - name: Find Images
-        id: find
+      - name: 🔎 Görüntüleri bul
+        id: find_files
         run: |
           cd extracted
           case "${{ inputs.image_type }}" in
-            boot) patterns="boot.img" ;;
-            recovery) patterns="recovery.img" ;;
-            modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img" ;;
+            boot) pattern="boot.img" ;;
+            recovery) pattern="recovery.img" ;;
+            modem) pattern="NON-HLOS.bin md1img.img modem.bin modem.img" ;;
           esac
 
-          for pattern in $patterns; do
-            file=$(find . -name "$pattern" | head -1)
-            [ -f "$file" ] && break
-          done
+          # Dosyayı ara
+          file=$(find . -type f \( -name "*.img" -o -name "*.bin" \) | grep -iE "$pattern" | head -1)
 
+          # Payload.bin fallback
           [ -z "$file" ] && [ -f payload.bin ] && {
-            python3 -m pip install protobuf pyelftools
+            echo "⚙️ Payload.bin'den çıkarılıyor..."
             git clone https://github.com/vm03/payload_dumper.git
+            python3 -m pip install protobuf pyelftools
             python3 payload_dumper/payload_dumper.py payload.bin
-            file=$(find . -name "$pattern" | head -1)
+            file=$(find . -type f \( -name "*.img" -o -name "*.bin" \) | grep -iE "$pattern" | head -1)
           }
 
-          [ -z "$file" ] && exit 1
-          echo "file=$file" >> $GITHUB_OUTPUT
+          [ -z "$file" ] && echo "❌ Dosya bulunamadı" && exit 1
+          echo "file_path=$file" >> $GITHUB_OUTPUT
 
-      - name: Package
-        run: |
-          cd extracted
-          output="${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip).zip"
-          7z a "../$output" "${{ steps.find.outputs.file }}"
-
-      - name: Upload
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: auto
-          files: ${{ inputs.image_type }}_*.zip
+      - name: 📁
