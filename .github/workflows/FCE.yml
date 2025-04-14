@@ -8,7 +8,7 @@ on:
         description: 'Firmware ZIP URL'
       firmware_name:
         required: true
-        description: 'Firmware base name (dosya adı, .zip uzantısı olmadan)'
+        description: 'Firmware Base Name (without .zip)'
       track:
         required: false
         description: 'Tracking ID'
@@ -64,8 +64,8 @@ jobs:
             recovery) patterns="recovery.img" ;;
             modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img" ;;
           esac
-
-          # Search for files
+          
+          # Search for image files
           found=false
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
@@ -75,8 +75,8 @@ jobs:
               break
             fi
           done
-
-          # Fallback to payload.bin
+          
+          # Fallback: If image not found, try using payload.bin and payload_dumper
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
             echo "Using payload_dumper..."
             git clone https://github.com/vm03/payload_dumper.git
@@ -92,11 +92,12 @@ jobs:
               fi
             done
           fi
-
+          
           [ "$found" = false ] && exit 1
           echo "file_name=$output_file" >> $GITHUB_OUTPUT
 
       - name: Upload release
+        if: success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
@@ -104,6 +105,38 @@ jobs:
           draft: false
           prerelease: false
 
+      - name: URL Encode KV Key
+        id: urlencode
+        run: |
+          # KV key format: "<image_type>:<firmware_name>"
+          key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
+          encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$key'''))")
+          echo "::set-output name=encoded::$encoded"
+
+      - name: Update KV on Success
+        if: success()
+        run: |
+          key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
+          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null}"
+          echo "Updating KV record for key $key with value $data"
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "$data"
+
+      - name: Update KV on Failure
+        if: failure()
+        run: |
+          key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
+          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"Extraction process failed.\"}"
+          echo "Updating KV record for key $key with value $data"
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "$data"
+      
       - name: Cleanup
         if: always()
         run: rm -rf extracted
