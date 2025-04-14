@@ -130,8 +130,6 @@ jobs:
         with:
           tag_name: auto
           files: ${{ steps.process.outputs.file_name }}
-          draft: false
-          prerelease: false
 
       - name: URL Encode KV Key
         id: urlencode
@@ -148,10 +146,15 @@ jobs:
           file="${{ steps.process.outputs.file_name }}"
           data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"$file\"}"
           echo "Updating KV: $data"
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
-            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            --data "$data"
+            --data "$data")
+
+          if ! echo "$response" | grep -q '"success":true'; then
+            echo "::error::KV güncelleme başarısız (success): $response"
+            exit 1
+          fi
 
       - name: Update KV on Failure
         if: failure()
@@ -161,10 +164,15 @@ jobs:
           error_msg=$(grep "::error::" $GITHUB_STEP_SUMMARY | sed -n 's/.*::error:://p' | tail -1 || echo "Unknown failure")
           data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
           echo "Updating KV (failure): $data"
-          curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
-            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            --data "$data"
+            --data "$data")
+
+          if ! echo "$response" | grep -q '"success":true'; then
+            echo "::error::KV güncelleme başarısız (failure): $response"
+            exit 1
+          fi
 
       - name: Cleanup
         if: always()
