@@ -38,19 +38,26 @@ jobs:
 
       - name: Setup Environment
         run: |
+          # Gerekli paketleri kur
           sudo apt-get update -qq
           sudo apt-get install -y \
             android-sdk-libsparse-utils \
             p7zip-full \
             aria2 \
             brotli \
-            python3-pip
-          
-          # Fix simg2img path
+            python3-pip \
+            git
+
+          # simg2img için sembolik link oluştur
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
-          
-          # Install payload dumper
-          pip install -q -r ./tools/requirements.txt
+
+          # Payload dumper'ı klonla (eğer yoksa)
+          if [ ! -d "tools" ]; then
+            git clone https://github.com/vm03/payload_dumper.git tools
+          fi
+
+          # Python bağımlılıklarını kur
+          pip install -q protobuf pyelftools
           echo "Environment setup completed"
 
       - name: Download Firmware
@@ -72,10 +79,11 @@ jobs:
 
       - name: Extract Files
         run: |
+          mkdir -p extracted
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
-          echo "Extracted files:"
-          ls -R extracted || true
+          echo "Extracted files structure:"
+          find extracted -type f | head -n 20
 
       - name: Process Images
         id: process
@@ -83,6 +91,7 @@ jobs:
           cd extracted
           rom_name=$(basename "${{ inputs.url }}" .zip)
           output_file="${{ inputs.image_type }}_${rom_name}.zip"
+          mkdir -p ../release
           
           declare -A file_patterns=(
             ["boot"]="boot.img"
@@ -90,21 +99,23 @@ jobs:
             ["modem"]="NON-HLOS.bin md1img.img modem.bin modem.img"
           )
 
-          # Search in all paths
+          # Tüm dizinlerde ara
+          found_file=""
           for path in $SEARCH_PATHS; do
             [ ! -d "$path" ] && continue
             for pattern in ${file_patterns[${{ inputs.image_type }}]}; do
-              if [ -f "$path/$pattern" ]; then
-                echo "Found $path/$pattern"
-                7z a "../release/$output_file" "$path/$pattern"
-                echo "output_file=$output_file" >> $GITHUB_OUTPUT
-                exit 0
+              file_path="$path/$pattern"
+              if [ -f "$file_path" ]; then
+                echo "Found $file_path"
+                7z a "../release/$output_file" "$file_path"
+                found_file="$file_path"
+                break 2
               fi
             done
           done
 
-          # Fallback to payload.bin
-          if [ -f "payload.bin" ]; then
+          # Payload.bin fallback
+          if [ -z "$found_file" ] && [ -f "payload.bin" ]; then
             echo "Extracting from payload.bin..."
             python3 ../tools/payload_dumper.py --out . --images "${{ inputs.image_type }}"* payload.bin
             
@@ -112,14 +123,19 @@ jobs:
               if [ -f "$pattern" ]; then
                 echo "Found extracted $pattern"
                 7z a "../release/$output_file" "$pattern"
-                echo "output_file=$output_file" >> $GITHUB_OUTPUT
-                exit 0
+                found_file="$pattern"
+                break
               fi
             done
           fi
 
-          echo "::error::No ${{ inputs.image_type }} files found in patterns: ${file_patterns[${{ inputs.image_type }}]}"
-          exit 1
+          if [ -z "$found_file" ]; then
+            echo "::error::No ${{ inputs.image_type }} files found in: ${file_patterns[${{ inputs.image_type }}]}"
+            exit 1
+          fi
+
+          echo "output_file=$output_file" >> $GITHUB_OUTPUT
+          echo "Processed $found_file successfully"
 
       - name: Upload Release
         uses: softprops/action-gh-release@v1
