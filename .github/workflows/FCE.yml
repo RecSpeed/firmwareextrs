@@ -139,7 +139,25 @@ jobs:
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$key'''))")
           echo "encoded=$encoded" >> $GITHUB_OUTPUT
-
+          
+      - name: Validate Secrets
+        run: |
+         if [ -z "${{ secrets.CF_API_TOKEN }}" ]; then
+         echo "::error::Cloudflare API Token tanımlı değil!"
+         echo "Lütfen GitHub Repository Settings > Secrets bölümünden CF_API_TOKEN ekleyin"
+         exit 1
+         fi
+    
+         if [ -z "${{ secrets.CF_ACCOUNT_ID }}" ]; then
+         echo "::error::Cloudflare Account ID tanımlı değil!"
+         exit 1
+         fi
+    
+          if [ -z "${{ secrets.CF_NAMESPACE_ID }}" ]; then
+          echo "::error::Cloudflare Namespace ID tanımlı değil!"
+          exit 1
+         fi
+    
       - name: Update KV on Success
         if: success()
         run: |
