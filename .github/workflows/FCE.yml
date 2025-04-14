@@ -45,14 +45,14 @@ jobs:
             python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
           git clone https://github.com/vm03/payload_dumper.git tools
-          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+          aria2c -x 8 -s 8 --out=erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
           7z x erofs-utils.zip -otools
           pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
           rm -f erofs-utils.zip
 
       - name: Download firmware
         run: |
-          aria2c -x 8 -s 8 -k 1M --file-allocation=none --summary-interval=0 --allow-overwrite=true --out=firmware.zip "${{ inputs.url }}" || exit 1
+          aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" || exit 1
           [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
       - name: Extract files
@@ -69,10 +69,10 @@ jobs:
         id: process
         run: |
           cd extracted
-          output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
-
           echo "📂 Listing current directory contents:"
           find . -type f | sort
+
+          output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
 
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img"; payload_partition="boot" ;;
@@ -104,6 +104,9 @@ jobs:
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
             echo "Using payload_dumper for $payload_partition"
             if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
+              echo "📂 Listing payload_dumper output:"
+              find . -type f | sort
+
               for pattern in $patterns; do
                 file=$(find . -iname "$pattern" | head -n 1)
                 if [ -f "$file" ]; then
