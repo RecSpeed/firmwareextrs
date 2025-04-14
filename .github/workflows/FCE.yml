@@ -33,110 +33,7 @@ jobs:
           echo "Firmware Name: ${{ inputs.firmware_name }}"
           echo "Track ID: ${{ inputs.track || 'None' }}"
 
-      - name: Setup environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            android-sdk-libsparse-utils \
-            p7zip-full \
-            aria2 \
-            brotli \
-            python3-pip
-          sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
-          git clone https://github.com/vm03/payload_dumper.git tools
-          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
-          7z x erofs-utils.zip -otools
-          pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
-          rm -f erofs-utils.zip
-
-      - name: Download firmware
-        run: |
-          aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" || exit 1
-          [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
-
-      - name: Extract files
-        run: |
-          7z x firmware.zip -oextracted -y
-          rm -f firmware.zip
-
-      - name: Find and package image
-        id: process
-        run: |
-          cd extracted
-          output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
-
-          case "${{ inputs.image_type }}" in
-            boot) patterns="boot.img"; payload_partition="boot" ;;
-            recovery) patterns="recovery.img"; payload_partition="recovery" ;;
-            modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img"; payload_partition="modem" ;;
-            system_ext) patterns="system_ext.img"; payload_partition="system_ext" ;;
-            vendor_boot) patterns="vendor_boot.img"; payload_partition="vendor_boot" ;;
-            init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
-          esac
-
-          found=false
-          for pattern in $patterns; do
-            file=$(find . -iname "$pattern" | head -n 1)
-            if [ -f "$file" ]; then
-              if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-                7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . || \
-                (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk .) || \
-                (echo "::error::Settings.apk extraction failed" && exit 1)
-                7z a "../$output_file" Settings.apk
-              else
-                7z a "../$output_file" "$file"
-              fi
-              found=true
-              break
-            fi
-          done
-
-          if [ "$found" = false ] && [ -f "payload.bin" ]; then
-            echo "Using payload_dumper for $payload_partition"
-            if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
-              for pattern in $patterns; do
-                file=$(find . -iname "$pattern" | head -n 1)
-                if [ -f "$file" ]; then
-                  if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                    sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-                    7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . || \
-                    (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk .) || \
-                    (echo "::error::Settings.apk extraction failed" && exit 1)
-                    7z a "../$output_file" Settings.apk
-                  else
-                    7z a "../$output_file" "$file"
-                  fi
-                  found=true
-                  break
-                fi
-              done
-            else
-              echo "::error::payload_dumper.py failed"
-              exit 1
-            fi
-          fi
-
-          if [ "$found" = false ]; then
-            echo "::error::Target image not found"
-            exit 1
-          fi
-
-          echo "file_name=$output_file" >> $GITHUB_OUTPUT
-
-      - name: Upload release
-        if: success()
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: auto
-          files: ${{ steps.process.outputs.file_name }}
-
-      - name: URL Encode KV Key
-        id: urlencode
-        run: |
-          key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
-          encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$key'''))")
-          echo "encoded=$encoded" >> $GITHUB_OUTPUT
+      # ... [İşlem adımlarını buraya tekrar yazmadım, sadece KV update kısmı aşağıda]
 
       - name: Update KV on Success
         if: success()
@@ -145,8 +42,8 @@ jobs:
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           file="${{ steps.process.outputs.file_name }}"
           data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"$file\"}"
-          echo "Updating KV: $data"
-          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+          echo "Updating KV (success): $data"
+          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
@@ -162,10 +59,10 @@ jobs:
         run: |
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          error_msg=$(grep "::error::" $GITHUB_STEP_SUMMARY | sed -n 's/.*::error:://p' | tail -1 || echo "Unknown failure")
+          error_msg=$(grep "::error::" "$GITHUB_STEP_SUMMARY" | sed -n 's/.*::error:://p' | tail -1 || echo "Unknown failure")
           data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
           echo "Updating KV (failure): $data"
-          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
+          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
@@ -175,7 +72,3 @@ jobs:
             echo "::error::KV güncelleme başarısız (failure): $response"
             exit 1
           fi
-
-      - name: Cleanup
-        if: always()
-        run: rm -rf extracted tools
