@@ -52,7 +52,7 @@ jobs:
 
       - name: Download firmware
         run: |
-          aria2c -x 7 -s 7 -k 1M --continue --out=firmware.zip "${{ inputs.url }}" || exit 1
+          aria2c -x 16 -s 16 -k 1M --file-allocation=none --summary-interval=0 --allow-overwrite=true --out=firmware.zip "${{ inputs.url }}" || exit 1
           [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
       - name: Extract files
@@ -60,11 +60,19 @@ jobs:
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
 
+      - name: List extracted files
+        run: |
+          echo "📂 Listing extracted files:"
+          find extracted/ -type f | sort
+
       - name: Find and package image
         id: process
         run: |
           cd extracted
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
+
+          echo "📂 Listing current directory contents:"
+          find . -type f | sort
 
           case "${{ inputs.image_type }}" in
             boot) patterns="boot.img"; payload_partition="boot" ;;
