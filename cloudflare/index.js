@@ -4,7 +4,6 @@ export default {
       const url = new URL(request.url);
       const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
       const firmwareUrl = url.searchParams.get('url');
-      const incomingTrack = url.searchParams.get('track');
 
       if (!['boot', 'recovery', 'modem'].includes(imageType)) {
         return createResponse(400, { 
@@ -21,9 +20,10 @@ export default {
       
       const cleanUrl = firmwareUrl.split('?')[0];
       const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
+      // KV anahtarı: imageType ve firmware adını birlikte kullanıyoruz
       const kvKey = `${imageType}:${firmwareName}`;
       
-      // Önce, hazır asset kontrolü (dosya üretilmişse)
+      // İlk olarak, releasede dosya hazır mı kontrol edelim
       const asset = await checkReleaseAsset(env.GTKK, imageType, firmwareName);
       if (asset) {
         return createResponse(200, {
@@ -33,39 +33,48 @@ export default {
         });
       }
       
-      // KV'de saklı track_id var mı kontrol edelim
-      const savedTrack = await env.FCE_KV.get(kvKey);
-      if (savedTrack) {
-        if (await checkActiveRun(env.GTKK, savedTrack)) {
-          // Eğer aktif run varsa, mevcut track_id üzerinden "processing" yanıtı döndür.
-          return createResponse(200, {
-            status: 'processing',
-            tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
-            track_id: savedTrack
-          });
-        } else {
-          // Run artık aktif değil, yani workflow tamamlanmış (başarısız ya da başka bir sonuçla) demektir.
-          // Bu durumda KV kaydını temizleyip hata döndürüyoruz.
-          await env.FCE_KV.delete(kvKey);
-          return createResponse(500, {
-            error: 'Workflow failed',
-            message: 'Extraction process failed. Please retry.'
-          });
+      // KV'de bu firmware için bir kayıt var mı?
+      const kvValue = await env.FCE_KV.get(kvKey);
+      if (kvValue) {
+        // KV değerini parse edip mevcut durumu kontrol edelim
+        try {
+          const record = JSON.parse(kvValue);
+          // Eğer mevcut kayıt "processing" ya da "failed" durumunda ise,
+          // aynı firmware için yeni işlem başlatılmasına gerek yok.
+          if (record.state === "processing") {
+            return createResponse(200, {
+              status: "processing",
+              tracking_url: "https://github.com/RecSpeed/firmwareextrs/actions",
+              track_id: kvKey  // KV anahtarını track_id olarak kullanıyoruz
+            });
+          } else if (record.state === "failed") {
+            return createResponse(500, {
+              error: "Workflow failed",
+              message: record.error || "Extraction process failed. Please retry."
+            });
+          }
+        } catch (e) {
+          // Parse edilemezse, kaydı yokmuş gibi davranıp yeni işlem başlatabilirsiniz.
         }
       }
       
-      // KV'de kayıt yoksa, yeni bir workflow tetikleyelim
-      const trackId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 300 }); // TTL 5dk olarak ayarlanabilir
+      // KV kaydı yoksa; yani bu firmware için işlem henüz başlamamış
+      // KV'ye "processing" durumunu yazıyoruz. TTL 5 dakika (300 saniye) olarak ayarlanıyor.
+      const newRecord = { state: "processing", timestamp: new Date().toISOString(), error: null };
+      await env.FCE_KV.put(kvKey, JSON.stringify(newRecord), { expirationTtl: 300 });
       
+      // Yeni workflow tetikleme: Yeni işlem başlatılıyor.
       const dispatchResp = await triggerWorkflow(env.GTKK, {
         url: cleanUrl,
-        track: trackId,
+        // track olarak KV key'ini (örn. imageType:firmwareName) gönderiyoruz,
+        // böylece workflow bu kaydı güncelleyebilir.
+        track: kvKey,
         image_type: imageType,
         firmware_name: firmwareName
       });
       
       if (!dispatchResp.ok) {
+        // Eğer dispatch başarısız olursa, KV kaydını silebilir veya güncelleyebilirsiniz.
         await env.FCE_KV.delete(kvKey);
         const error = await dispatchResp.text();
         console.error('Dispatch failed:', error);
@@ -78,7 +87,7 @@ export default {
       return createResponse(200, {
         status: 'processing',
         tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
-        track_id: trackId
+        track_id: kvKey
       });
       
     } catch (error) {
@@ -108,31 +117,6 @@ async function checkReleaseAsset(token, imageType, firmwareName) {
   } catch (e) {
     console.error('Release check error:', e);
     return null;
-  }
-}
-
-async function checkActiveRun(token, trackId) {
-  try {
-    const response = await fetch(
-      'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?per_page=100',
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'User-Agent': 'FCE-Worker'
-        }
-      }
-    );
-    if (!response.ok) return false;
-    const { workflow_runs } = await response.json();
-    // Sadece 'in_progress' ve 'queued' durumlarını aktif olarak kabul ediyoruz.
-    return workflow_runs.some(run => {
-      const status = run.status;
-      return (status === 'in_progress' || status === 'queued') &&
-             run.inputs?.track === trackId;
-    });
-  } catch (e) {
-    console.error('Active run check error:', e);
-    return false;
   }
 }
 
