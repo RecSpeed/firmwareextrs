@@ -80,7 +80,7 @@ jobs:
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
             echo "Using payload_dumper..."
             git clone https://github.com/vm03/payload_dumper.git
-            python3 -m pip install protobuf pyelftools
+            python3 -m pip install protobuf pyelftools bsdiff4
             python3 payload_dumper/payload_dumper.py payload.bin
             
             for pattern in $patterns; do
