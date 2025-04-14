@@ -49,7 +49,7 @@ jobs:
             -H "Content-Type: application/json" \
             --data "$data")
 
-          if [[ "$(echo "$response" | jq -r .success)" != "true" ]]; then
+          if [[ "$response" != *'"success":true'* ]]; then
             echo "::error::KV güncelleme başarısız (success): $response"
             exit 1
           fi
@@ -68,7 +68,7 @@ jobs:
             -H "Content-Type: application/json" \
             --data "$data")
 
-          if [[ "$(echo "$response" | jq -r .success)" != "true" ]]; then
+          if [[ "$response" != *'"success":true'* ]]; then
             echo "::error::KV güncelleme başarısız (failure): $response"
             exit 1
           fi
