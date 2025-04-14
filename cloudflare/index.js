@@ -59,7 +59,7 @@ export default {
       
       // 6. Henüz track yoksa, yeni track oluştur ve workflow tetikle
       const trackId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 3600 });
+      await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 300 });
       
       const dispatchResp = await triggerWorkflow(env.GTKK, {
         url: cleanUrl,
