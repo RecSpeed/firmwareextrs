@@ -5,7 +5,7 @@ export default {
       const url = new URL(request.url);
       const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
       const firmwareUrl = url.searchParams.get('url');
-      // Gelen istekte track var mı?
+      // İsteğe ek track parametresi varsa alalım
       const incomingTrack = url.searchParams.get('track');
 
       // 2. Parametre validasyonu
@@ -26,27 +26,8 @@ export default {
       const cleanUrl = firmwareUrl.split('?')[0];
       const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
       const kvKey = `${imageType}:${firmwareName}`;
-
-      // 4. Gelen istekte track parametresi varsa, mevcut işlemi kontrol et
-      if (incomingTrack) {
-        const savedTrack = await env.FCE_KV.get(kvKey);
-        if (savedTrack && savedTrack === incomingTrack) {
-          // Eğer ilgili track hâlâ aktifse, doğrudan processing durumunu döndür
-          const isActive = await checkActiveRun(env.GTKK, incomingTrack);
-          if (isActive) {
-            return createResponse(200, {
-              status: 'processing',
-              tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
-              track_id: incomingTrack
-            });
-          } else {
-            // İşlem tamamlanmışsa, KV’den silip yeni işlem başlatmaya izin ver
-            await env.FCE_KV.delete(kvKey);
-          }
-        }
-      }
       
-      // 5. Önce GitHub'daki hazır dosyayı kontrol et
+      // 4. Eğer firmware hazırsa, asset kontrolü önce
       const asset = await checkReleaseAsset(env.GTKK, imageType, firmwareName);
       if (asset) {
         return createResponse(200, {
@@ -56,25 +37,30 @@ export default {
         });
       }
       
-      // 6. Mevcut aktif işlem kontrolü (track parametresi yoksa veya KV'de hali hazırda varsa)
-      const existingTrack = await env.FCE_KV.get(kvKey);
-      if (existingTrack) {
-        if (await checkActiveRun(env.GTKK, existingTrack)) {
-          return createResponse(200, {
-            status: 'processing',
-            tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
-            track_id: existingTrack
-          });
-        } else {
-          await env.FCE_KV.delete(kvKey);
-        }
+      // 5. KV’de saklı track_id kontrolü
+      const savedTrack = await env.FCE_KV.get(kvKey);
+      if (incomingTrack && savedTrack && savedTrack === incomingTrack) {
+        // Eğer gelen track parametresi KV’dekiyle uyumlu ise, yeni workflow tetiklenmeden mevcut değeri döndür
+        return createResponse(200, {
+          status: 'processing',
+          tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
+          track_id: incomingTrack
+        });
       }
       
-      // 7. Yeni işlem başlat (track parametresi yoksa veya KV temizlendiyse)
-      const trackId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // KV’de hali hazırda bir track varsa, bunu döndür
+      if (savedTrack) {
+        return createResponse(200, {
+          status: 'processing',
+          tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
+          track_id: savedTrack
+        });
+      }
+      
+      // 6. Henüz track yoksa, yeni track oluştur ve workflow tetikle
+      const trackId = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
       await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 3600 });
       
-      // 8. GitHub Action tetikle
       const dispatchResp = await triggerWorkflow(env.GTKK, {
         url: cleanUrl,
         track: trackId,
@@ -129,30 +115,7 @@ async function checkReleaseAsset(token, imageType, firmwareName) {
   }
 }
 
-// checkActiveRun fonksiyonunu "in_progress" ile birlikte "queued" durumunu da kontrol edecek şekilde güncelliyoruz
-async function checkActiveRun(token, trackId) {
-  try {
-    const response = await fetch(
-      'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?per_page=100',
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'User-Agent': 'FCE-Worker'
-        }
-      }
-    );
-    if (!response.ok) return false;
-    const { workflow_runs } = await response.json();
-    return workflow_runs.some(run => {
-      const status = run.status;
-      return (status === 'in_progress' || status === 'queued') && run.inputs?.track === trackId;
-    });
-  } catch (e) {
-    console.error('Active run check error:', e);
-    return false;
-  }
-}
-
+// Yeni workflow tetiklemek için kullanacağımız fonksiyon
 async function triggerWorkflow(token, inputs) {
   return fetch(
     'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches',
