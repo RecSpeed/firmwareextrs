@@ -21,7 +21,7 @@ export default {
         });
       }
 
-      // 3. URL normalizasyonu
+      // 3. URL normalizasyonu ve firmware adının belirlenmesi
       const cleanUrl = firmwareUrl.split('?')[0];
       const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
       const kvKey = `${imageType}:${firmwareName}`;
@@ -54,11 +54,12 @@ export default {
       const trackId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 3600 });
 
-      // 7. GitHub Action tetikle
+      // 7. GitHub Action tetikle (firmware_name ekleniyor)
       const dispatchResp = await triggerWorkflow(env.GTKK, {
         url: cleanUrl,
         track: trackId,
-        image_type: imageType
+        image_type: imageType,
+        firmware_name: firmwareName
       });
 
       if (!dispatchResp.ok) {
@@ -87,7 +88,7 @@ export default {
   }
 };
 
-// Helper functions
+// GitHub Release kontrolü
 async function checkReleaseAsset(token, imageType, firmwareName) {
   try {
     const response = await fetch(
@@ -108,10 +109,11 @@ async function checkReleaseAsset(token, imageType, firmwareName) {
   }
 }
 
+// checkActiveRun fonksiyonunu "in_progress" ile birlikte "queued" durumunu da kontrol edecek şekilde güncelliyoruz
 async function checkActiveRun(token, trackId) {
   try {
     const response = await fetch(
-      'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?status=in_progress',
+      'https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?per_page=100',
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -121,7 +123,10 @@ async function checkActiveRun(token, trackId) {
     );
     if (!response.ok) return false;
     const { workflow_runs } = await response.json();
-    return workflow_runs.some(run => run.inputs?.track === trackId);
+    return workflow_runs.some(run => {
+      const status = run.status;
+      return (status === 'in_progress' || status === 'queued') && run.inputs?.track === trackId;
+    });
   } catch (e) {
     console.error('Active run check error:', e);
     return false;
