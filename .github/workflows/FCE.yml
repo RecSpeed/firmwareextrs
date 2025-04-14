@@ -45,14 +45,14 @@ jobs:
             python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
           git clone https://github.com/vm03/payload_dumper.git tools
-          aria2c -x 8 -s 8 --out=erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
           7z x erofs-utils.zip -otools
           pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==1.28.5
           rm -f erofs-utils.zip
 
       - name: Download firmware
         run: |
-          aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}" || exit 1
+          aria2c -x 8 -s 8 --continue --out=firmware.zip "${{ inputs.url }}" || exit 1
           [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
       - name: Extract files
@@ -67,56 +67,36 @@ jobs:
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
 
           case "${{ inputs.image_type }}" in
-            boot) patterns="boot.img"; payload_partition="boot" ;;
-            recovery) patterns="recovery.img"; payload_partition="recovery" ;;
-            modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; payload_partition="modem" ;;
-            system_ext) patterns="system_ext.img"; payload_partition="system_ext" ;;
-            vendor_boot) patterns="vendor_boot.img"; payload_partition="vendor_boot" ;;
-            init_boot) patterns="init_boot.img"; payload_partition="init_boot" ;;
-            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; payload_partition="" ;;
+            boot) patterns="boot.img"; partition="boot" ;;
+            recovery) patterns="recovery.img"; partition="recovery" ;;
+            modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partition="modem" ;;
+            vendor_boot) patterns="vendor_boot.img"; partition="vendor_boot" ;;
+            init_boot) patterns="init_boot.img"; partition="init_boot" ;;
+            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partition="preloader" ;;
           esac
 
           found=false
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
-              if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-                7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . || \
-                (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk .) || \
-                (echo "::error::Settings.apk extraction failed" && exit 1)
-                7z a "../$output_file" Settings.apk
-              else
-                7z a "../$output_file" "$file"
-              fi
+              7z a "../$output_file" "$file"
               found=true
               break
             fi
           done
 
-          if [ "$found" = false ] && [ -f "payload.bin" ] && [ -n "$payload_partition" ]; then
-            echo "Using payload_dumper for $payload_partition"
-            if python3 ../tools/payload_dumper.py --images "$payload_partition" payload.bin; then
-              for pattern in $patterns; do
-                file=$(find . -iname "$pattern" | head -n 1)
-                if [ -f "$file" ]; then
-                  if [ "${{ inputs.image_type }}" = "system_ext" ]; then
-                    sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
-                    7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . || \
-                    (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk .) || \
-                    (echo "::error::Settings.apk extraction failed" && exit 1)
-                    7z a "../$output_file" Settings.apk
-                  else
-                    7z a "../$output_file" "$file"
-                  fi
-                  found=true
-                  break
-                fi
-              done
-            else
-              echo "::error::payload_dumper.py failed"
-              exit 1
-            fi
+          if [ "$found" = false ] && [ -f "payload.bin" ]; then
+            echo "Trying to extract from payload.bin: $partition"
+            python3 ../tools/payload_dumper.py --images "$partition" payload.bin || true
+
+            for pattern in $patterns; do
+              file=$(find . -iname "$pattern" | head -n 1)
+              if [ -f "$file" ]; then
+                7z a "../$output_file" "$file"
+                found=true
+                break
+              fi
+            done
           fi
 
           if [ "$found" = false ]; then
@@ -149,7 +129,7 @@ jobs:
             --data "$data")
 
           if ! echo "$response" | jq -e '.success == true' > /dev/null; then
-            echo "::error::KV güncelleme başarısız (success): $response"
+            echo "::error::KV g\u00fcncelleme ba\u015far\u0131s\u0131z (success): $response"
             exit 1
           fi
 
@@ -169,7 +149,7 @@ jobs:
             --data "$data")
 
           if ! echo "$response" | jq -e '.success == true' > /dev/null; then
-            echo "::error::KV güncelleme başarısız (failure): $response"
+            echo "::error::KV g\u00fcncelleme ba\u015far\u0131s\u0131z (failure): $response"
             exit 1
           fi
 
