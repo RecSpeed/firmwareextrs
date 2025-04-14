@@ -52,7 +52,7 @@ jobs:
 
       - name: Download firmware
         run: |
-          aria2c -x 12 -s 12 -k 1M --continue --out=firmware.zip "${{ inputs.url }}" || exit 1
+          aria2c -x 4 -s 4 -k 1M --continue --out=firmware.zip "${{ inputs.url }}" || exit 1
           [ -f firmware.zip ] || (echo "::error::Download failed" && exit 1)
 
       - name: Extract files
