@@ -1,41 +1,46 @@
 export default {
   async fetch(request, env) {
     try {
-      // Input validation
-      const { searchParams } = new URL(request.url);
-      const imageType = searchParams.get('type')?.toLowerCase() || 'boot';
-      const firmwareUrl = searchParams.get('url');
+      // Debug headers
+      const headers = Object.fromEntries(request.headers);
+      console.log('Request headers:', JSON.stringify(headers));
+
+      // Validate request
+      const url = new URL(request.url);
+      const imageType = url.searchParams.get('type')?.toLowerCase() || 'boot';
+      const firmwareUrl = url.searchParams.get('url');
       
       if (!['boot', 'recovery', 'modem'].includes(imageType)) {
-        return jsonResponse(400, { error: 'Invalid image type' });
+        return createResponse(400, { error: 'Invalid type. Use boot/recovery/modem' });
       }
 
       if (!firmwareUrl?.match(/\.zip($|\?)/i)) {
-        return jsonResponse(400, { error: 'Invalid firmware URL' });
+        return createResponse(400, { error: 'URL must end with .zip' });
       }
 
-      // Process request
-      const normalizedUrl = firmwareUrl.split('.zip')[0] + '.zip';
-      const firmwareName = normalizedUrl.split('/').pop().replace('.zip', '');
+      // Normalize URL
+      const cleanUrl = firmwareUrl.split('.zip')[0] + '.zip';
+      const firmwareName = cleanUrl.split('/').pop().replace('.zip', '');
       const kvKey = `${imageType}:${firmwareName}`;
 
-      // Check existing processing
+      // Check KV for existing process
       const existingTrack = await env.FCE_KV.get(kvKey);
       if (existingTrack) {
-        const isActive = await checkGitHubRun(env.GTKK, existingTrack);
+        const isActive = await checkActiveRun(env.GTKK, existingTrack);
         if (!isActive) await env.FCE_KV.delete(kvKey);
-        return jsonResponse(isActive ? 200 : 404, {
+        return createResponse(isActive ? 200 : 404, {
           status: isActive ? 'processing' : 'retry',
           tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions'
         });
       }
 
       // Check existing release
-      const asset = await checkGitHubRelease(env.GTKK, imageType, firmwareName);
+      const asset = await checkReleaseAsset(env.GTKK, imageType, firmwareName);
       if (asset) {
-        return jsonResponse(200, {
+        return createResponse(200, {
           status: 'ready',
-          download_url: asset.browser_download_url
+          download_url: asset.browser_download_url,
+          file_name: asset.name
         });
       }
 
@@ -43,59 +48,104 @@ export default {
       const trackId = Date.now().toString();
       await env.FCE_KV.put(kvKey, trackId, { expirationTtl: 1800 });
 
-      const dispatch = await triggerGitHubAction(env.GTKK, {
-        url: normalizedUrl,
+      const dispatch = await triggerWorkflow(env.GTKK, {
+        url: cleanUrl,
         track: trackId,
         image_type: imageType
       });
 
       if (!dispatch.ok) {
         await env.FCE_KV.delete(kvKey);
-        return jsonResponse(500, { error: 'Failed to start process' });
+        const errorText = await dispatch.text();
+        console.error('Dispatch failed:', errorText);
+        return createResponse(500, { error: 'Workflow dispatch failed' });
       }
 
-      return jsonResponse(200, {
+      return createResponse(200, {
         status: 'processing',
-        tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions'
+        tracking_url: 'https://github.com/RecSpeed/firmwareextrs/actions',
+        track_id: trackId
       });
 
     } catch (error) {
-      return jsonResponse(500, { error: error.message });
+      console.error('Unhandled error:', error);
+      return createResponse(500, { 
+        error: 'Internal server error',
+        details: error.message 
+      });
     }
   }
 };
 
 // Helper functions
-async function checkGitHubRun(token, trackId) {
-  const res = await fetch('https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?status=in_progress', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  const { workflow_runs } = await res.json();
-  return workflow_runs.some(run => run.inputs?.track === trackId);
+async function checkActiveRun(token, trackId) {
+  try {
+    const response = await fetch('https://api.github.com/repos/RecSpeed/firmwareextrs/actions/runs?status=in_progress', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'FCE-Worker',
+        'Accept': 'application/vnd.github+json'
+      }
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`GitHub API error: ${error}`);
+    }
+
+    const { workflow_runs } = await response.json();
+    return workflow_runs.some(run => run.inputs?.track === trackId);
+  } catch (error) {
+    console.error('Failed to check active runs:', error);
+    return false;
+  }
 }
 
-async function checkGitHubRelease(token, imageType, firmwareName) {
-  const res = await fetch('https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  const { assets } = await res.json();
-  return assets.find(a => a.name === `${imageType}_${firmwareName}.zip`);
+async function checkReleaseAsset(token, imageType, firmwareName) {
+  try {
+    const response = await fetch('https://api.github.com/repos/RecSpeed/firmwareextrs/releases/tags/auto', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'FCE-Worker',
+        'Accept': 'application/vnd.github+json'
+      }
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`GitHub API error: ${error}`);
+    }
+
+    const { assets } = await response.json();
+    return assets.find(a => a.name === `${imageType}_${firmwareName}.zip`);
+  } catch (error) {
+    console.error('Failed to check release:', error);
+    return null;
+  }
 }
 
-async function triggerGitHubAction(token, inputs) {
+async function triggerWorkflow(token, inputs) {
   return fetch('https://api.github.com/repos/RecSpeed/firmwareextrs/actions/workflows/FCE.yml/dispatches', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'User-Agent': 'FCE-Worker',
+      'Accept': 'application/vnd.github+json'
     },
-    body: JSON.stringify({ ref: 'main', inputs })
+    body: JSON.stringify({
+      ref: 'main',
+      inputs
+    })
   });
 }
 
-function jsonResponse(status, data) {
-  return new Response(JSON.stringify(data), { 
+function createResponse(status, data) {
+  return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    }
   });
 }
