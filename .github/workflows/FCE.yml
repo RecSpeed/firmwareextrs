@@ -1,4 +1,4 @@
-name: Firmware Extraction
+name: Enhanced Firmware Extraction
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ on:
       image_type:
         required: true
         default: 'boot'
-        description: 'boot/recovery/modem'
+        description: 'boot/recovery/modem/system_ext'
 
 concurrency:
   group: extract-${{ inputs.image_type }}-${{ inputs.firmware_name }}
@@ -40,8 +40,16 @@ jobs:
             android-sdk-libsparse-utils \
             p7zip-full \
             aria2 \
-            brotli
+            brotli \
+            python3-pip
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
+          
+          # Install payload_dumper and erofs-utils
+          git clone https://github.com/vm03/payload_dumper.git tools
+          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+          7z x erofs-utils.zip -otools
+          pip install -r ./tools/requirements.txt protobuf pyelftools bsdiff4 telethon==3.4.8
+          rm -f erofs-utils.zip
 
       - name: Download firmware
         run: |
@@ -63,6 +71,9 @@ jobs:
             boot) patterns="boot.img" ;;
             recovery) patterns="recovery.img" ;;
             modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img" ;;
+            system_ext) patterns="system_ext.img" ;;
+            vendor_boot) patterns="vendor_boot.img" ;;
+            init_boot) patterns="init_boot.img" ;;
           esac
           
           # Search for image files
@@ -70,7 +81,15 @@ jobs:
           for pattern in $patterns; do
             file=$(find . -iname "$pattern" | head -n 1)
             if [ -f "$file" ]; then
-              7z a "../$output_file" "$file"
+              if [ "${{ inputs.image_type }}" = "system_ext" ]; then
+                # Special handling for system_ext to extract Settings.apk
+                sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
+                7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
+                (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
+                7z a "../$output_file" Settings.apk
+              else
+                7z a "../$output_file" "$file"
+              fi
               found=true
               break
             fi
@@ -79,14 +98,20 @@ jobs:
           # Fallback: If image not found, try using payload.bin and payload_dumper
           if [ "$found" = false ] && [ -f "payload.bin" ]; then
             echo "Using payload_dumper..."
-            git clone https://github.com/vm03/payload_dumper.git
-            python3 -m pip install protobuf pyelftools bsdiff4
-            python3 payload_dumper/payload_dumper.py payload.bin
+            python3 ../tools/payload_dumper.py payload.bin
             
             for pattern in $patterns; do
               file=$(find . -iname "$pattern" | head -n 1)
               if [ -f "$file" ]; then
-                7z a "../$output_file" "$file"
+                if [ "${{ inputs.image_type }}" = "system_ext" ]; then
+                  # Special handling for system_ext to extract Settings.apk
+                  sudo mkdir -p /mnt/priv-app/Settings && sudo chmod -R 777 /mnt
+                  7z x "$file" -o/mnt -y && sudo cp /mnt/priv-app/Settings/Settings.apk . && echo "method 1 used" || \
+                  (../tools/extract.erofs -i "$file" -x -o . && cp system_ext/priv-app/Settings/Settings.apk . && echo "method 2 used" || (echo "both methods failed" && exit 1))
+                  7z a "../$output_file" Settings.apk
+                else
+                  7z a "../$output_file" "$file"
+                fi
                 found=true
                 break
               fi
@@ -118,7 +143,7 @@ jobs:
         run: |
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null}"
+          data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"${{ steps.process.outputs.file_name }}\"}"
           echo "Updating KV record for key $key with value $data"
           curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/${{ steps.urlencode.outputs.encoded }}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
@@ -139,4 +164,4 @@ jobs:
       
       - name: Cleanup
         if: always()
-        run: rm -rf extracted
+        run: rm -rf extracted tools
