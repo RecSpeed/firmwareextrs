@@ -5,149 +5,79 @@ on:
     inputs:
       url:
         required: true
-        description: 'Firmware ZIP URL'
+        type: string
       track:
         required: false
-        description: 'Tracking ID'
+        type: string
       image_type:
         required: true
         default: 'boot'
-        description: 'boot/recovery/modem'
+        type: choice
+        options: ['boot', 'recovery', 'modem']
 
-env:
-  SEARCH_PATHS: ". firmware-update firmware images radio"
-  MAX_RETRIES: 3
-  RETRY_DELAY: 10
+concurrency:
+  group: extract-${{ inputs.image_type }}-${{ hash(inputs.url) }}
+  cancel-in-progress: true
 
 jobs:
   extract:
-    name: Extract ${{ inputs.image_type }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
 
     steps:
-      - name: Validate Inputs
+      - name: Setup
         run: |
-          echo "Starting processing for Track ID: ${{ inputs.track }}"
-          if [[ ! "${{ inputs.url }}" =~ \.zip($|\?) ]]; then
-            echo "::error::Invalid URL pattern"
-            exit 1
-          fi
-          echo "Processing ${{ inputs.image_type }} image from ${{ inputs.url }}"
-
-      - uses: actions/checkout@v4
-
-      - name: Setup Environment
-        run: |
-          sudo apt-get update -qq
+          sudo apt-get update
           sudo apt-get install -y \
             android-sdk-libsparse-utils \
             p7zip-full \
             aria2 \
             brotli \
-            python3-pip \
-            jq \
-            curl
+            jq
 
-          sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
-
-          if [ ! -d "tools" ]; then
-            git clone https://github.com/vm03/payload_dumper.git tools
-          fi
-
-          pip install -q protobuf pyelftools
-          echo "Environment setup completed"
-
-      - name: Download Firmware
+      - name: Download
         run: |
-          for i in $(seq 1 $MAX_RETRIES); do
-            if aria2c -x 8 -s 8 --out=firmware.zip "${{ inputs.url }}"; then
-              echo "Download completed successfully"
-              break
-            fi
-            
-            if [ $i -eq $MAX_RETRIES ]; then
-              echo "::error::Download failed after $MAX_RETRIES attempts"
-              exit 1
-            fi
-            
-            echo "Attempt $i failed, retrying in $RETRY_DELAY seconds..."
-            sleep $RETRY_DELAY
-          done
+          aria2c -x 8 -s 8 -o firmware.zip "${{ inputs.url }}" || exit 1
+          [ -f firmware.zip ] || (echo "Download failed" && exit 1)
 
-      - name: Extract Files
+      - name: Extract
         run: |
-          mkdir -p extracted
           7z x firmware.zip -oextracted -y
           rm -f firmware.zip
-          echo "Extracted files structure:"
-          find extracted -type f | head -n 20
 
-      - name: Process Images
-        id: process
+      - name: Find Images
+        id: find
         run: |
           cd extracted
-          rom_name=$(basename "${{ inputs.url }}" .zip)
-          output_file="${{ inputs.image_type }}_${rom_name}.zip"
-          mkdir -p ../release
-          
-          declare -A file_patterns=(
-            ["boot"]="boot.img"
-            ["recovery"]="recovery.img"
-            ["modem"]="NON-HLOS.bin md1img.img modem.bin modem.img"
-          )
+          case "${{ inputs.image_type }}" in
+            boot) patterns="boot.img" ;;
+            recovery) patterns="recovery.img" ;;
+            modem) patterns="NON-HLOS.bin md1img.img modem.bin modem.img" ;;
+          esac
 
-          found_file=""
-          for path in $SEARCH_PATHS; do
-            [ ! -d "$path" ] && continue
-            for pattern in ${file_patterns[${{ inputs.image_type }}]}; do
-              file_path="$path/$pattern"
-              if [ -f "$file_path" ]; then
-                echo "Found $file_path"
-                7z a "../release/$output_file" "$file_path"
-                found_file="$file_path"
-                break 2
-              fi
-            done
+          for pattern in $patterns; do
+            file=$(find . -name "$pattern" | head -1)
+            [ -f "$file" ] && break
           done
 
-          if [ -z "$found_file" ] && [ -f "payload.bin" ]; then
-            echo "Extracting from payload.bin..."
-            python3 ../tools/payload_dumper.py --out . --images "${{ inputs.image_type }}"* payload.bin
-            
-            for pattern in ${file_patterns[${{ inputs.image_type }}]}; do
-              if [ -f "$pattern" ]; then
-                echo "Found extracted $pattern"
-                7z a "../release/$output_file" "$pattern"
-                found_file="$pattern"
-                break
-              fi
-            done
-          fi
+          [ -z "$file" ] && [ -f payload.bin ] && {
+            python3 -m pip install protobuf pyelftools
+            git clone https://github.com/vm03/payload_dumper.git
+            python3 payload_dumper/payload_dumper.py payload.bin
+            file=$(find . -name "$pattern" | head -1)
+          }
 
-          if [ -z "$found_file" ]; then
-            echo "::error::No ${{ inputs.image_type }} files found"
-            exit 1
-          fi
+          [ -z "$file" ] && exit 1
+          echo "file=$file" >> $GITHUB_OUTPUT
 
-          echo "output_file=$output_file" >> $GITHUB_OUTPUT
+      - name: Package
+        run: |
+          cd extracted
+          output="${{ inputs.image_type }}_$(basename "${{ inputs.url }}" .zip).zip"
+          7z a "../$output" "${{ steps.find.outputs.file }}"
 
-      - name: Upload Release
+      - name: Upload
         uses: softprops/action-gh-release@v1
         with:
           tag_name: auto
-          files: release/${{ steps.process.outputs.output_file }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -rf extracted release
-
-      - name: Update KV Store (Optional)
-        if: success()
-        run: |
-          echo "KV update skipped in simplified version"
+          files: ${{ inputs.image_type }}_*.zip
