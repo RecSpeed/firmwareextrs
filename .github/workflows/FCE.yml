@@ -64,13 +64,13 @@ jobs:
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
 
           case "${{ inputs.image_type }}" in
-            boot) patterns="boot.img"; partitions="boot" ;;
-            recovery) patterns="recovery.img"; partitions="recovery" ;;
-            modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partitions="modem md1img md1img.img md1img.bin NON-HLOS modem.img modem.bin" ;;
-            vendor_boot) patterns="vendor_boot.img"; partitions="vendor_boot" ;;
-            init_boot) patterns="init_boot.img"; partitions="init_boot" ;;
-            preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partitions="preloader_raw" ;;
-            *) echo "::error::Unsupported image_type: ${{ inputs.image_type }}" && exit 1 ;;
+          boot) patterns="boot.img"; partitions="boot" ;;
+          recovery) patterns="recovery.img"; partitions="recovery" ;;
+          modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partitions="modem md1img md1img.img md1img.bin NON-HLOS modem.img modem.bin" ;;
+          vendor_boot) patterns="vendor_boot.img"; partitions="vendor_boot" ;;
+          init_boot) patterns="init_boot.img"; partitions="init_boot" ;;
+          preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partitions="preloader_raw preloader" ;;
+          *) echo "::error::Unsupported image_type: ${{ inputs.image_type }}" && exit 1 ;;
           esac
 
           found=false
