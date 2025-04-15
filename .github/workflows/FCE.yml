@@ -26,26 +26,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    steps:
-      - name: Setup environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            android-sdk-libsparse-utils \
-            p7zip-full \
-            aria2 \
-            brotli \
-            jq \
-            python3-pip
+    steps:  
+      - uses: actions/checkout@v4  
 
-          sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
+      - name: cache  
+        id: cache  
+        uses: actions/cache@v4  
+        with:  
+          path: |  
+            ~/.local/lib/python3*/site-packages  
+            tools  
+          key: ${{ runner.os }}-cache-${{ hashFiles('**/tools/*') }}  
+          restore-keys: |  
+            ${{ runner.os }}-cache-  
 
-          git clone --depth=1 https://github.com/vm03/payload_dumper.git tools
-          aria2c -x 7 -s 7 -k 1M --continue --max-tries=0 --file-allocation=none -o erofs-utils.zip "https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip"
-          7z x erofs-utils.zip -otools
-          rm -f erofs-utils.zip
-
-          pip install --no-cache-dir -r ./tools/requirements.txt
+      - name: install  
+        if: steps.cache.outputs.cache-hit != 'true'  
+        run: |  
+          if [ ! -d tools ]; then  
+            sudo apt-get update && sudo apt-get install -y python3-pip p7zip-full aria2  
+            git clone https://github.com/vm03/payload_dumper.git tools  
+            aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip  
+            7z x erofs-utils.zip -otools  
+            pip install -r ./tools/requirements.txt  
+            rm -f erofs-utils.zip  
+            pip install telethon==3.4.8  
+          fi  
 
       - name: Download firmware
         run: |
