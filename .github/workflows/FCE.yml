@@ -41,9 +41,10 @@ jobs:
           sudo ln -sf /usr/lib/android-sdk/libsparse-utils/simg2img /usr/local/bin/
 
           git clone --depth=1 https://github.com/vm03/payload_dumper.git tools
-          aria2c -x 8 -s 8 -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+          aria2c -x 7 -s 7 --max-tries=1 --retry-wait=5 --timeout=10 --file-allocation=none -o erofs-utils.zip "https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip"
           7z x erofs-utils.zip -otools
           rm -f erofs-utils.zip
+
 
           pip install --no-cache-dir -r ./tools/requirements.txt
 
