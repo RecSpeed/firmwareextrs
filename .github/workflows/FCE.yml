@@ -56,7 +56,7 @@ jobs:
       - name: Download firmware
         run: |
           aria2c \
-          -x 7 -s 7 -k 1M \
+          -x 7 -s 7 \
           --continue \
           --max-tries=0 \
           --file-allocation=none \
