@@ -26,48 +26,60 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    steps:  
-      - uses: actions/checkout@v4  
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: cache  
-        id: cache  
-        uses: actions/cache@v4  
-        with:  
-          path: |  
-            ~/.local/lib/python3*/site-packages  
-            tools  
-          key: ${{ runner.os }}-cache-${{ hashFiles('**/tools/*') }}  
-          restore-keys: |  
-            ${{ runner.os }}-cache-  
+      # Cache pip wheel downloads so installs are faster
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('tools/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: install  
-        if: steps.cache.outputs.cache-hit != 'true'  
-        run: |  
-          if [ ! -d tools ]; then  
-            sudo apt-get update && sudo apt-get install -y python3-pip p7zip-full aria2  
-            git clone https://github.com/vm03/payload_dumper.git tools  
-            aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip  
-            7z x erofs-utils.zip -otools  
-            pip install -r ./tools/requirements.txt  
-            rm -f erofs-utils.zip  
-            pip install telethon==3.4.8  
-          fi  
+      # Cache the tools/ directory (payload_dumper repo + erofs-utils)
+      - name: Cache tools directory
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: tools
+          key: ${{ runner.os }}-tools-${{ hashFiles('tools/**') }}
+          restore-keys: |
+            ${{ runner.os }}-tools-
+
+      # Install system packages, clone & unzip tools only on cache miss
+      - name: Install system deps & prepare tools
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip p7zip-full aria2 git
+          git clone https://github.com/vm03/payload_dumper.git tools
+          aria2c -o erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.1-240810/erofs-utils-v1.8.1-gddbed144-Linux_x86_64-2408101422.zip
+          7z x erofs-utils.zip -otools
+          rm erofs-utils.zip
+
+      # Install all Python requirements (always runs, but will be fast due to pip cache)
+      - name: Install Python packages
+        run: |
+          pip install --upgrade pip
+          pip install -r tools/requirements.txt telethon==0.18.0.2
 
       - name: Download firmware
         run: |
           aria2c \
-          -x 8 -s 8 -k 1M \
-          --continue \
-          --summary-interval=15 \
-          --max-tries=0 \
-          --out=firmware.zip \
-          --header="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36" \
-          "${{ inputs.url }}"
+            -x 8 -s 8 -k 1M \
+            --continue \
+            --summary-interval=15 \
+            --max-tries=0 \
+            --out=firmware.zip \
+            --header="User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            "${{ inputs.url }}"
 
       - name: Extract ZIP contents
         run: |
           7z x firmware.zip -oextracted -y
-          rm -f firmware.zip
+          rm firmware.zip
 
       - name: Find and package image
         id: process
@@ -76,21 +88,19 @@ jobs:
           output_file="${{ inputs.image_type }}_${{ inputs.firmware_name }}.zip"
 
           case "${{ inputs.image_type }}" in
-          boot) patterns="boot.img"; partitions="boot" ;;
-          recovery) patterns="recovery.img"; partitions="recovery" ;;
-          modem) patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partitions="modem md1img md1img.img md1img.bin NON-HLOS modem.img modem.bin" ;;
-          vendor_boot) patterns="vendor_boot.img"; partitions="vendor_boot" ;;
-          init_boot) patterns="init_boot.img"; partitions="init_boot" ;;
-          preloader) patterns="preloader_raw.img preloader.bin preloader.img"; partitions="preloader_raw preloader" ;;
-          *) echo "::error::Unsupported image_type: ${{ inputs.image_type }}" && exit 1 ;;
+            boot)         patterns="boot.img";             partitions="boot" ;;
+            recovery)     patterns="recovery.img";         partitions="recovery" ;;
+            modem)        patterns="NON-HLOS.bin modem.bin modem.img md1img.img md1img.bin"; partitions="NON-HLOS modem md1img" ;;
+            vendor_boot)  patterns="vendor_boot.img";      partitions="vendor_boot" ;;
+            init_boot)    patterns="init_boot.img";        partitions="init_boot" ;;
+            preloader)    patterns="preloader_raw.img preloader.bin preloader.img"; partitions="preloader_raw" ;;
+            *)            echo "::error::Unsupported image_type: ${{ inputs.image_type }}" && exit 1 ;;
           esac
 
           found=false
-
           echo "🔍 Searching inside extracted ZIP for patterns..."
           for pattern in $patterns; do
-            file=$(find . -iname "$pattern" | head -n 1)
-            if [ -f "$file" ]; then
+            if file=$(find . -iname "$pattern" | head -n1) && [ -f "$file" ]; then
               echo "✅ Found in ZIP: $file"
               7z a "../$output_file" "$file"
               found=true
@@ -100,14 +110,13 @@ jobs:
             fi
           done
 
-          if [ "$found" = false ] && [ -f "payload.bin" ]; then
+          if [ "$found" = false ] && [ -f payload.bin ]; then
             echo "📦 payload.bin detected, trying partition extraction..."
             for part in $partitions; do
               echo "➡️ Trying partition: $part"
               if python3 ../tools/payload_dumper.py --images "$part" payload.bin; then
                 for pattern in $patterns; do
-                  file=$(find . -iname "$pattern" | head -n 1)
-                  if [ -f "$file" ]; then
+                  if file=$(find . -iname "$pattern" | head -n1) && [ -f "$file" ]; then
                     echo "✅ Found after extracting $part: $file"
                     7z a "../$output_file" "$file"
                     found=true
@@ -142,20 +151,15 @@ jobs:
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           file="${{ steps.process.outputs.file_name }}"
-          data="{\"state\": \"complete\", \"timestamp\": \"$timestamp\", \"error\": null, \"file\": \"$file\"}"
-          echo "Updating KV (success): $data"
-
-          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
+          data="{\"state\":\"complete\",\"timestamp\":\"$timestamp\",\"error\":null,\"file\":\"$file\"}"
+          curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
             --data "$data" \
-            --data-urlencode "expiration_ttl=2592000")
-
-          if ! echo "$response" | jq -e '.success == true' > /dev/null; then
-            echo "::error::KV güncelleme başarısız (success): $response"
-            exit 1
-          fi
+            --data-urlencode "expiration_ttl=2592000" \
+          | jq -e '.success==true' >/dev/null \
+          || (echo "::error::KV güncelleme başarısız (success)" && exit 1)
 
       - name: Update KV on Failure
         if: failure()
@@ -163,20 +167,15 @@ jobs:
           key="${{ inputs.image_type }}:${{ inputs.firmware_name }}"
           timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           error_msg=$(grep "::error::" "$GITHUB_STEP_SUMMARY" | sed -n 's/.*::error:://p' | tail -1 || echo "Unknown failure")
-          data="{\"state\": \"failed\", \"timestamp\": \"$timestamp\", \"error\": \"$error_msg\", \"tracking_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
-          echo "Updating KV (failure): $data"
-
-          response=$(curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
+          data="{\"state\":\"failed\",\"timestamp\":\"$timestamp\",\"error\":\"$error_msg\",\"tracking_url\":\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}"
+          curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_NAMESPACE_ID }}/values/$key" \
             -H "X-Auth-Email: ${{ secrets.CF_X_AUTH_EMAIL }}" \
             -H "X-Auth-Key: ${{ secrets.CF_X_AUTH_KEY }}" \
             -H "Content-Type: application/json" \
             --data "$data" \
-            --data-urlencode "expiration_ttl=1800")
-
-            if ! echo "$response" | jq -e '.success == true' > /dev/null; then
-            echo "::error::KV güncelleme başarısız (failure): $response"
-            exit 1
-          fi
+            --data-urlencode "expiration_ttl=1800" \
+          | jq -e '.success==true' >/dev/null \
+          || (echo "::error::KV güncelleme başarısız (failure)" && exit 1)
 
       - name: Cleanup
         if: always()
